@@ -30,3 +30,10 @@
 *.exe
 *.out
 *.app
+
+# Debug & Build
+build
+MariFiles
+
+# MacOS
+.DS_Store
