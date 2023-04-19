@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
     }
 
     nds::init(argv[1], argv[2]);
-    //nds::run();
+    nds::run();
 
     return 0;
 }
