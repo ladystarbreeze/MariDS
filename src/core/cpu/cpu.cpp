@@ -30,7 +30,13 @@ CPU::CPU(int cpuID, CP15 *cp15) {
     if (cpuID == 7) {
         r[CPUReg::PC] = static_cast<u32>(VectorBase::ARM7);
 
-        assert(false);
+        read8  = &bus::read8ARM7;
+        read16 = &bus::read16ARM7;
+        read32 = &bus::read32ARM7;
+
+        write8  = &bus::write8ARM7;
+        write16 = &bus::write16ARM7;
+        write32 = &bus::write32ARM7;
     } else {
         r[CPUReg::PC] = static_cast<u32>(VectorBase::ARM9);
 

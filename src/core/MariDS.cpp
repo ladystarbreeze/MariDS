@@ -15,7 +15,7 @@ namespace nds {
 
 cpu::CP15 cp15;
 
-cpu::CPU arm9(9, &cp15);
+cpu::CPU arm7(7, NULL), arm9(9, &cp15);
 
 void init(const char *bios7Path, const char *bios9Path) {
     std::printf("[MariDS    ] BIOS7: \"%s\"\n[MariDS    ] BIOS9: \"%s\"\n", bios7Path, bios9Path);
@@ -27,6 +27,7 @@ void init(const char *bios7Path, const char *bios9Path) {
 void run() {
     while (true) {
         cpu::interpreter::run(&arm9, 16);
+        cpu::interpreter::run(&arm7, 8);
     }
 }
 

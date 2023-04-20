@@ -13,6 +13,19 @@ namespace nds::bus {
 
 // NDS memory regions
 
+/* ARM7 base addresses */
+enum class Memory7Base : u32 {
+    BIOS = 0x00000000,
+    WRAM = 0x03800000,
+    MMIO = 0x04000000,
+};
+
+/* ARM7 memory limits */
+enum class Memory7Limit : u32 {
+    BIOS = 0x00004000,
+    WRAM = 0x00010000,
+};
+
 /* ARM9 base addresses */
 enum class Memory9Base : u32 {
     DTCM = 0x00800000,
@@ -30,6 +43,7 @@ enum class Memory9Limit : u32 {
 // NDS ARM7 memory
 
 std::vector<u8> bios7;
+std::vector<u8> wram;
 
 // NDS ARM9 memory
 
@@ -43,7 +57,7 @@ std::vector<u8> mainMem;
 
 // Registers
 
-u8 postflg9;
+u8 postflg7, postflg9;
 
 /* Returns true if address is in range [base;limit] */
 bool inRange(u64 addr, u64 base, u64 limit) {
@@ -57,11 +71,62 @@ void init(const char *bios7Path, const char *bios9Path) {
     assert(bios7.size() == 0x4000); // 16KB
     assert(bios9.size() == 0x1000); // 4KB
 
+    wram.resize(static_cast<u32>(Memory7Limit::WRAM));
     mainMem.resize(static_cast<u32>(Memory9Limit::Main));
 
-    postflg9 = 0;
+    postflg7 = postflg9 = 0;
 
     std::printf("[Bus       ] OK!\n");
+}
+
+u8 read8ARM7(u32 addr) {
+    switch (addr) {
+        case static_cast<u32>(Memory9Base::MMIO) + 0x300:
+            std::printf("[Bus:ARM7  ] Read8 @ POSTFLG\n");
+            return postflg7;
+        default:
+            std::printf("[Bus:ARM7  ] Unhandled read8 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+}
+
+u16 read16ARM7(u32 addr) {
+    assert(!(addr & 1));
+
+    u16 data;
+
+    if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
+        std::memcpy(&data, &bios7[addr & (static_cast<u32>(Memory7Limit::BIOS) - 1)], sizeof(u16));
+    } else {
+        switch (addr) {
+            default:
+                std::printf("[Bus:ARM7  ] Unhandled read16 @ 0x%08X\n", addr);
+
+                exit(0);
+        }
+    }
+
+    return data;
+}
+
+u32 read32ARM7(u32 addr) {
+    assert(!(addr & 3));
+
+    u32 data;
+
+    if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
+        std::memcpy(&data, &bios7[addr & (static_cast<u32>(Memory7Limit::BIOS) - 1)], sizeof(u32));
+    } else {
+        switch (addr) {
+            default:
+                std::printf("[Bus:ARM7  ] Unhandled read32 @ 0x%08X\n", addr);
+
+                exit(0);
+        }
+    }
+
+    return data;
 }
 
 u8 read8ARM9(u32 addr) {
@@ -80,6 +145,7 @@ u16 read16ARM9(u32 addr) {
     assert(!(addr & 1));
     
     u16 data;
+
     if (inRange(addr, static_cast<u32>(Memory9Base::Main), 2 * static_cast<u32>(Memory9Limit::Main))) {
         std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], sizeof(u16));
     } else if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
@@ -107,6 +173,50 @@ u32 read32ARM9(u32 addr) {
     }
 
     return data;
+}
+
+void write8ARM7(u32 addr, u8 data) {
+    if (false) {
+    } else {
+        switch (addr) {
+            case static_cast<u32>(Memory7Base::MMIO) + 0x208:
+                std::printf("[Bus:ARM7  ] Write8 @ IME = 0x%02X\n", data);
+                break;
+            default:
+                std::printf("[Bus:ARM7  ] Unhandled write8 @ 0x%08X = 0x%02X\n", addr, data);
+
+                exit(0);
+        }
+    }
+}
+
+void write16ARM7(u32 addr, u16 data) {
+    assert(!(addr & 1));
+
+    if (false) {
+    } else {
+        switch (addr) {
+            default:
+                std::printf("[Bus:ARM7  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
+
+                exit(0);
+        }
+    }
+}
+
+void write32ARM7(u32 addr, u32 data) {
+    assert(!(addr & 3));
+    
+    if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
+        std::memcpy(&wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], &data, sizeof(u32));
+    } else {
+        switch (addr) {
+            default:
+                std::printf("[Bus:ARM7  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
+
+                exit(0);
+        }
+    }
 }
 
 void write8ARM9(u32 addr, u8 data) {
