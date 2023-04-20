@@ -32,6 +32,7 @@ CPU::CPU(int cpuID) {
     } else {
         r[CPUReg::PC] = static_cast<u32>(VectorBase::ARM9);
 
+        read8  = &bus::read8ARM9;
         read32 = &bus::read32ARM9;
     }
 

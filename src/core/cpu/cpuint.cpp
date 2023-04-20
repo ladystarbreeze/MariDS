@@ -177,6 +177,85 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 }
 
+/* ARM state Single Data Transfer */
+template<bool isP, bool isU, bool isB, bool isW, bool isL, bool isImm>
+void aSingleDataTransfer(CPU *cpu, u32 instr) {
+    if constexpr (!isImm) {
+        std::printf("[ARM%d      ] Unhandled register offset Single Data Transfer instruction 0x%08X\n", cpu->cpuID, instr);
+
+        exit(0);
+    }
+    
+    // Get operands
+    const auto rd = (instr >> 12) & 0xF;
+    const auto rn = (instr >> 16) & 0xF;
+
+    auto addr = cpu->get(rn);
+
+    if constexpr (!isL) const auto data = cpu->get(rd);
+
+    assert(!(!isP && isW)); // Unprivileged transfer?
+
+    // Get offset
+    u32 offset;
+
+    if constexpr (isImm) {
+        offset = instr & 0xFFF;
+    } else {
+        assert(false);
+    }
+
+    // Handle pre-index
+    if constexpr (isP) {
+        if constexpr (isU) {
+            addr += offset;
+        } else {
+            addr -= offset;
+        }
+    }
+
+    if constexpr (isL) {
+        if constexpr (isB) {
+            assert(rd != CPUReg::PC); // Shouldn't happen
+
+            cpu->r[rd] = cpu->read8(addr);
+        } else {
+            assert(false);
+        }
+    } else {
+        assert(false);
+    }
+
+    // Handle post-index & writeback
+    if (!isL || (rn != rd)) {
+        if constexpr (!isP) {
+            assert(rn != CPUReg::PC); // Shouldn't happen
+
+            if constexpr (isU) {
+                addr += offset;
+            } else {
+                addr -= offset;
+            }
+
+            cpu->r[rn] = addr;
+        } else if constexpr (isW) {
+            cpu->r[rn] = addr;
+        }
+    }
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        if constexpr (isL) {
+            assert(isImm);
+
+            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, [%s%s, %s0x%03X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+        } else {
+            assert(false);
+        }
+    }
+}
+
 /* Returns true if the instruction passes the condition code test */
 bool testCond(CPU *cpu, Condition cond) {
     auto &cpsr = cpu->cpsr;
@@ -242,6 +321,44 @@ void init() {
         if (((i & 0x1B0) != 0x100) && ((i & 0x1B0) != 0x120)) { // Don't include UDF and MSR
             // Immediate DP
             instrTableARM[i | 0x200] = &aDataProcessing<true, false, false>;
+        }
+    }
+
+    for (int i = 0x400; i < 0x600; i++) {
+        // Immediate SDT
+        switch ((i >> 4) & 0x1F) {
+            case 0x00: instrTableARM[i] = &aSingleDataTransfer<0, 0, 0, 0, 0, 1>; break;
+            case 0x01: instrTableARM[i] = &aSingleDataTransfer<0, 0, 0, 0, 1, 1>; break;
+            case 0x02: instrTableARM[i] = &aSingleDataTransfer<0, 0, 0, 1, 0, 1>; break;
+            case 0x03: instrTableARM[i] = &aSingleDataTransfer<0, 0, 0, 1, 1, 1>; break;
+            case 0x04: instrTableARM[i] = &aSingleDataTransfer<0, 0, 1, 0, 0, 1>; break;
+            case 0x05: instrTableARM[i] = &aSingleDataTransfer<0, 0, 1, 0, 1, 1>; break;
+            case 0x06: instrTableARM[i] = &aSingleDataTransfer<0, 0, 1, 1, 0, 1>; break;
+            case 0x07: instrTableARM[i] = &aSingleDataTransfer<0, 0, 1, 1, 1, 1>; break;
+            case 0x08: instrTableARM[i] = &aSingleDataTransfer<0, 1, 0, 0, 0, 1>; break;
+            case 0x09: instrTableARM[i] = &aSingleDataTransfer<0, 1, 0, 0, 1, 1>; break;
+            case 0x0A: instrTableARM[i] = &aSingleDataTransfer<0, 1, 0, 1, 0, 1>; break;
+            case 0x0B: instrTableARM[i] = &aSingleDataTransfer<0, 1, 0, 1, 1, 1>; break;
+            case 0x0C: instrTableARM[i] = &aSingleDataTransfer<0, 1, 1, 0, 0, 1>; break;
+            case 0x0D: instrTableARM[i] = &aSingleDataTransfer<0, 1, 1, 0, 1, 1>; break;
+            case 0x0E: instrTableARM[i] = &aSingleDataTransfer<0, 1, 1, 1, 0, 1>; break;
+            case 0x0F: instrTableARM[i] = &aSingleDataTransfer<0, 1, 1, 1, 1, 1>; break;
+            case 0x10: instrTableARM[i] = &aSingleDataTransfer<1, 0, 0, 0, 0, 1>; break;
+            case 0x11: instrTableARM[i] = &aSingleDataTransfer<1, 0, 0, 0, 1, 1>; break;
+            case 0x12: instrTableARM[i] = &aSingleDataTransfer<1, 0, 0, 1, 0, 1>; break;
+            case 0x13: instrTableARM[i] = &aSingleDataTransfer<1, 0, 0, 1, 1, 1>; break;
+            case 0x14: instrTableARM[i] = &aSingleDataTransfer<1, 0, 1, 0, 0, 1>; break;
+            case 0x15: instrTableARM[i] = &aSingleDataTransfer<1, 0, 1, 0, 1, 1>; break;
+            case 0x16: instrTableARM[i] = &aSingleDataTransfer<1, 0, 1, 1, 0, 1>; break;
+            case 0x17: instrTableARM[i] = &aSingleDataTransfer<1, 0, 1, 1, 1, 1>; break;
+            case 0x18: instrTableARM[i] = &aSingleDataTransfer<1, 1, 0, 0, 0, 1>; break;
+            case 0x19: instrTableARM[i] = &aSingleDataTransfer<1, 1, 0, 0, 1, 1>; break;
+            case 0x1A: instrTableARM[i] = &aSingleDataTransfer<1, 1, 0, 1, 0, 1>; break;
+            case 0x1B: instrTableARM[i] = &aSingleDataTransfer<1, 1, 0, 1, 1, 1>; break;
+            case 0x1C: instrTableARM[i] = &aSingleDataTransfer<1, 1, 1, 0, 0, 1>; break;
+            case 0x1D: instrTableARM[i] = &aSingleDataTransfer<1, 1, 1, 0, 1, 1>; break;
+            case 0x1E: instrTableARM[i] = &aSingleDataTransfer<1, 1, 1, 1, 0, 1>; break;
+            case 0x1F: instrTableARM[i] = &aSingleDataTransfer<1, 1, 1, 1, 1, 1>; break;
         }
     }
 
