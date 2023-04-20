@@ -36,6 +36,7 @@ CPU::CPU(int cpuID) {
         read16 = &bus::read16ARM9;
         read32 = &bus::read32ARM9;
 
+        write8  = &bus::write8ARM9;
         write16 = &bus::write16ARM9;
         write32 = &bus::write32ARM9;
     }
@@ -102,6 +103,7 @@ void CPU::changeMode(CPUMode newMode) {
         switch (newMode) {
             case CPUMode::USR:
             case CPUMode::SYS:
+                cspsr = NULL;
                 break; // Do nothing
             case CPUMode::FIQ:
                 std::swap(rFIQ[0], r[8]);
@@ -112,22 +114,32 @@ void CPU::changeMode(CPUMode newMode) {
 
                 std::swap(spFIQ, r[CPUReg::SP]);
                 std::swap(lrFIQ, r[CPUReg::LR]);
+
+                cspsr = &spsrFIQ;
                 break;
             case CPUMode::IRQ:
                 std::swap(spIRQ, r[CPUReg::SP]);
                 std::swap(lrIRQ, r[CPUReg::LR]);
+
+                cspsr = &spsrIRQ;
                 break;
             case CPUMode::SVC:
                 std::swap(spSVC, r[CPUReg::SP]);
                 std::swap(lrSVC, r[CPUReg::LR]);
+
+                cspsr = &spsrSVC;
                 break;
             case CPUMode::ABT:
                 std::swap(spABT, r[CPUReg::SP]);
                 std::swap(lrABT, r[CPUReg::LR]);
+
+                cspsr = &spsrABT;
                 break;
             case CPUMode::UND:
                 std::swap(spUND, r[CPUReg::SP]);
                 std::swap(lrUND, r[CPUReg::LR]);
+
+                cspsr = &spsrUND;
                 break;
         }
 

@@ -105,6 +105,22 @@ u32 read32ARM9(u32 addr) {
     return data;
 }
 
+void write8ARM9(u32 addr, u8 data) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::Main), 2 * static_cast<u32>(Memory9Limit::Main))) {
+        mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)] = data;
+    } else {
+        switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x208:
+                std::printf("[Bus:ARM9  ] Write8 @ IME = 0x%02X\n", data);
+                break;
+            default:
+                std::printf("[Bus:ARM9  ] Unhandled write8 @ 0x%08X = 0x%02X\n", addr, data);
+
+                exit(0);
+        }
+    }
+}
+
 void write16ARM9(u32 addr, u16 data) {
     assert(!(addr & 1));
 

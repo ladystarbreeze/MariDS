@@ -53,7 +53,7 @@ struct PSR {
 
     void set(u8 mask, u32 data) {
         if (mask & (1 << 0)) {
-            assert(data & (1 << 4)); // Bit 4 *is* always high, but software usually doesn't write 0 to it
+            // Bit 4 *is* always high, but software usually doesn't write 0 to it
 
             switch (data & 0xF) {
                 case CPUMode::USR: mode = CPUMode::USR; break;
@@ -111,6 +111,7 @@ struct CPU {
     u16 (*read16)(u32);
     u32 (*read32)(u32);
 
+    void (*write8 )(u32, u8);
     void (*write16)(u32, u16);
     void (*write32)(u32, u32);
 

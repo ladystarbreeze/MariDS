@@ -299,12 +299,63 @@ void aBranch(CPU *cpu, u32 instr) {
     }
 }
 
+/* ARM state Branch and Exchange */
+void aBX(CPU *cpu, u32 instr) {
+    assert(((instr >> 12) & 0xF) == CPUReg::PC);
+
+    // Get source register
+    const auto rm = instr & 0xF;
+
+    assert(rm != CPUReg::PC);
+
+    const auto target = cpu->r[rm];
+
+    cpu->cpsr.t = target & 1;
+
+    cpu->r[CPUReg::PC] = target & ~1;
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        std::printf("[ARM%d      ] [0x%08X] BX%s %s; PC = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, regNames[rm], cpu->r[CPUReg::PC]);
+    }
+}
+
+/* MCR/MRC */
+template<bool isL>
+void aCoprocessorRegisterTransfer(CPU *cpu, u32 instr) {
+    assert(cpu->cpuID == 9); // NDS7 doesn't have any usable coprocessors
+
+    // Get operands
+    const auto rn = (instr >> 16) & 0xF;
+    const auto rd = (instr >> 12) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+
+    const auto opcode1 = (instr >> 21) & 7;
+    const auto opcode2 = (instr >>  5) & 7;
+
+    const auto cpNum = (instr >> 8) & 0xF;
+
+    assert(cpNum == 15);
+
+    // TODO: emulate CP15 accesses
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        if constexpr (isL) {
+            std::printf("[ARM%d      ] [0x%08X] MRC%s P%u, %u, %s, C%s, C%s, %u\n", cpu->cpuID, cpu->cpc, cond, cpNum, opcode1, regNames[rd], regNames[rn], regNames[rm], opcode2);
+        } else {
+            std::printf("[ARM%d      ] [0x%08X] MCR%s P%u, %u, %s, C%s, C%s, %u\n", cpu->cpuID, cpu->cpc, cond, cpNum, opcode1, regNames[rd], regNames[rn], regNames[rm], opcode2);
+        }
+    }
+}
+
 /* ARM state data processing */
 template<bool isImm, bool isImmShift, bool isRegShift>
 void aDataProcessing(CPU *cpu, u32 instr) {
     if constexpr (isRegShift) {
         std::printf("[ARM%d      ] Unhandled data processing instruction 0x%08X\n", cpu->cpuID, instr);
-        std::printf("IsImm = %d, IsImmShift = %d, IsRegShift = %d\n", isImm, isImmShift, isRegShift);
 
         exit(0);
     }
@@ -353,6 +404,15 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 
     switch (opcode) {
+        case DPOpcode::ADD:
+            {
+                const auto res = op1 + op2;
+
+                if (isS) setAddFlags(cpu, op1, op2, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
         case DPOpcode::TEQ:
             assert(isS); // Safeguard
 
@@ -386,7 +446,8 @@ void aDataProcessing(CPU *cpu, u32 instr) {
                     std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], op2, regNames[rd], cpu->r[rd]);
                     break;
                 default:
-                    assert(false);
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], regNames[rn], op2, regNames[rd], cpu->r[rd]);
+                    break;
             }
         } else {
             if constexpr (isImmShift) {
@@ -603,7 +664,7 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
         if (rd == 15) data += 4; // STR takes an extra cycle, which causes PC to be 12 bytes ahead
 
         if constexpr (isB) {
-            assert(false);
+            cpu->write8(addr, data);
         } else {
             cpu->write32(addr & ~3, data); // Force-align address
         }
@@ -848,6 +909,8 @@ void init() {
 
     instrTableARM[0x120] = &aMSR<false, false>;
     instrTableARM[0x160] = &aMSR<true , false>;
+    
+    instrTableARM[0x121] = &aBX;
 
     for (int i = 0x400; i < 0x600; i++) {
         // Immediate SDT
@@ -928,6 +991,16 @@ void init() {
     for (int i = 0xA00; i < 0xB00; i++) {
         instrTableARM[i | 0x000] = &aBranch<false>;
         instrTableARM[i | 0x100] = &aBranch<true>;
+    }
+
+    for (int i = 0xE00; i < 0xF00; i++) {
+        if (i & 1) {
+            if (i & (1 << 4)) {
+                instrTableARM[i] = &aCoprocessorRegisterTransfer<true>;
+            } else {
+                instrTableARM[i] = &aCoprocessorRegisterTransfer<false>;
+            }
+        }
     }
 
     // THUMB
