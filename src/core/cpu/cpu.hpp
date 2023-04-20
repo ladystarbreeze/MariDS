@@ -31,7 +31,7 @@ struct PSR {
 
     bool t, f, i; // THUMB state, FIQ disable, IRQ disable
 
-    bool q, o, c, z, n; // Sticky overflow, overflow, carry, zero, negative
+    bool q, v, c, z, n; // Sticky overflow, overflow, carry, zero, negative
 
     u32 get() {
         u32 data = 0x10; // Bit 4 is always high!
@@ -43,7 +43,7 @@ struct PSR {
         data |= (u32)i << 7;
 
         data |= (u32)q << 27;
-        data |= (u32)o << 28;
+        data |= (u32)v << 28;
         data |= (u32)c << 29;
         data |= (u32)z << 30;
         data |= (u32)n << 31;
@@ -77,7 +77,7 @@ struct PSR {
 
         if (mask & (1 << 3)) {
             q = data & (1 << 27);
-            o = data & (1 << 28);
+            v = data & (1 << 28);
             c = data & (1 << 29);
             z = data & (1 << 30);
             n = data & (1 << 31);
@@ -100,6 +100,7 @@ struct CPU {
     int cpuID;
 
     u32 r[16];
+    u32 cpc;
 
     PSR cpsr;
     PSR *cspsr;

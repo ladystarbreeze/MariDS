@@ -29,6 +29,12 @@ constexpr const char *regNames[] = {
     "R8", "R9", "R10", "R11", "R12", "SP", "LR", "PC",
 };
 
+/* Condition codes */
+enum Condition {
+    EQ, NE, HS, LO, MI, PL, VS, VC,
+    HI, LS, GE, LT, GT, LE, AL, NV,
+};
+
 /* Data Processing opcodes */
 enum DPOpcode {
     AND, EOR, SUB, RSB, ADD, ADC, SBC, RSC,
@@ -36,6 +42,24 @@ enum DPOpcode {
 };
 
 std::array<void (*)(CPU *, u32), 4096> instrTableARM;
+
+// Flag handlers
+
+/* Sets bit op flags */
+void setBitFlags(CPU *cpu, u32 c) {
+    cpu->cpsr.n = c & (1 << 31);
+    cpu->cpsr.z = !c;
+    cpu->cpsr.c = cpu->cout; // Carry out of barrel shifter
+    // V is left untouched
+}
+
+/* Sets SUB/RSB/CMP flags */
+void setSubFlags(CPU *cpu, u32 a, u32 b, u32 c) {
+    cpu->cpsr.n = c & (1 << 31);
+    cpu->cpsr.z = !c;
+    cpu->cpsr.c = a >= b;
+    cpu->cpsr.v = ((a ^ b) & (1 << 31)) && ((a ^ c) & (1 << 31)); // Signed overflow if a & b have different signs, and a & c have different signs
+}
 
 // Barrel shifter
 
@@ -56,7 +80,7 @@ u32 rotateImm(CPU *cpu, u32 imm, u32 amt, bool isS) {
 void aUnhandledInstruction(CPU *cpu, u32 instr) {
     const auto opcode = ((instr >> 4) & 0xF) | ((instr >> 16) & 0xFF0);
 
-    std::printf("[ARM%d      ] Unhandled instruction 0x%03X (0x%08X) @ 0x%08X\n", cpu->cpuID, opcode, instr, cpu->r[CPUReg::PC] - 4);
+    std::printf("[ARM%d      ] Unhandled instruction 0x%03X (0x%08X) @ 0x%08X\n", cpu->cpuID, opcode, instr, cpu->cpc);
 
     exit(0);
 }
@@ -75,9 +99,9 @@ void aBranch(CPU *cpu, u32 instr) {
 
     if (doDisasm) {
         if constexpr (isLink) {
-            std::printf("[ARM%d      ] BL%s 0x%08X; LR = 0x%08X\n", cpu->cpuID, condNames[instr >> 28], cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
+            std::printf("[ARM%d      ] [0x%08X] BL%s 0x%08X; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, condNames[instr >> 28], cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
         } else {
-            std::printf("[ARM%d      ] B%s 0x%08X\n", cpu->cpuID, condNames[instr >> 28], cpu->r[CPUReg::PC]);
+            std::printf("[ARM%d      ] [0x%08X] B%s 0x%08X\n", cpu->cpuID, cpu->cpc, condNames[instr >> 28], cpu->r[CPUReg::PC]);
         }
     }
 }
@@ -100,6 +124,8 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
     bool isS = instr & (1 << 20);
 
+    const auto op1 = cpu->get(rn);
+
     // Decode op2
     u32 op2;
 
@@ -115,9 +141,12 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
     switch (opcode) {
         case DPOpcode::CMP:
+            assert(isS); // Safeguard
+
+            setSubFlags(cpu, op1, op2, op1 - op2);
             break;
         case DPOpcode::MOV:
-            assert(!isS);
+            if (isS) setBitFlags(cpu, op2);
 
             cpu->r[rd] = op2;
             break;
@@ -133,10 +162,10 @@ void aDataProcessing(CPU *cpu, u32 instr) {
         if constexpr (isImm) {
             switch (opcode) {
                 case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
-                    std::printf("[ARM%d      ] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, dpNames[opcode], cond, regNames[rn], op2, regNames[rn], cpu->get(rn));
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rn], op2, regNames[rn], cpu->get(rn));
                     break;
                 case DPOpcode::MOV: case DPOpcode::MVN:
-                    std::printf("[ARM%d      ] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, dpNames[opcode], cond, regNames[rd], op2, regNames[rd], cpu->get(rd));
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], op2, regNames[rd], cpu->get(rd));
                     break;
                 default:
                     assert(false);
@@ -148,15 +177,46 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 }
 
-void decodeARM(CPU *cpu) {
-    const auto pc = cpu->r[CPUReg::PC];
+/* Returns true if the instruction passes the condition code test */
+bool testCond(CPU *cpu, Condition cond) {
+    auto &cpsr = cpu->cpsr;
 
-    assert(!(pc & 3));
+    switch (cond) {
+        case Condition::EQ: return cpsr.z;
+        case Condition::NE: return !cpsr.z;
+        case Condition::HS: return cpsr.c;
+        case Condition::LO: return !cpsr.c;
+        case Condition::MI: return cpsr.n;
+        case Condition::PL: return !cpsr.n;
+        case Condition::VS: return cpsr.v;
+        case Condition::VC: return !cpsr.v;
+        case Condition::HI: return cpsr.c && !cpsr.z;
+        case Condition::LS: return cpsr.z && !cpsr.c;
+        case Condition::GE: return cpsr.n == cpsr.v;
+        case Condition::LT: return cpsr.n != cpsr.v;
+        case Condition::GT: return (cpsr.n == cpsr.v) && !cpsr.z;
+        case Condition::LE: return (cpsr.n != cpsr.v) && cpsr.z;
+        case Condition::AL: return true;
+        case Condition::NV: return true; // Requires special handling on ARM9
+    }
+}
+
+void decodeARM(CPU *cpu) {
+    cpu->cpc = cpu->r[CPUReg::PC];
+
+    assert(!(cpu->cpc & 3));
 
     // Fetch instruction, increment program counter
-    const auto instr = cpu->read32(pc);
+    const auto instr = cpu->read32(cpu->cpc);
 
     cpu->r[CPUReg::PC] += 4;
+
+    // Check condition code
+    const auto cond = Condition(instr >> 28);
+
+    assert(cond != Condition::NV);
+
+    if (!testCond(cpu, cond)) return; // Instruction failed condition, don't execute
 
     // Get opcode
     const auto opcode = ((instr >> 4) & 0xF) | ((instr >> 16) & 0xFF0);
