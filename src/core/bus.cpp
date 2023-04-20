@@ -57,6 +57,22 @@ u8 read8ARM9(u32 addr) {
     }
 }
 
+u16 read16ARM9(u32 addr) {
+    assert(!(addr & 1));
+    
+    u16 data;
+
+    if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
+        std::memcpy(&data, &bios9[addr & 0xFFE], sizeof(u16));
+    } else {
+        std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
+
+        exit(0);
+    }
+
+    return data;
+}
+
 u32 read32ARM9(u32 addr) {
     assert(!(addr & 3));
     

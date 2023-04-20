@@ -41,9 +41,44 @@ enum DPOpcode {
     TST, TEQ, CMP, CMN, ORR, MOV, BIC, MVN,
 };
 
+/* Extra loadstores */
+enum ExtraLoadOpcode {
+    STRH  = 1,
+    LDRD  = 2,
+    STRD  = 3,
+    LDRH  = 5,
+    LDRSB = 6,
+    LDRSH = 7,
+};
+
 std::array<void (*)(CPU *, u32), 4096> instrTableARM;
+std::array<void (*)(CPU *, u16), 1024> instrTableTHUMB;
 
 // Flag handlers
+
+/* Returns true if the instruction passes the condition code test */
+bool testCond(CPU *cpu, Condition cond) {
+    auto &cpsr = cpu->cpsr;
+
+    switch (cond) {
+        case Condition::EQ: return cpsr.z;
+        case Condition::NE: return !cpsr.z;
+        case Condition::HS: return cpsr.c;
+        case Condition::LO: return !cpsr.c;
+        case Condition::MI: return cpsr.n;
+        case Condition::PL: return !cpsr.n;
+        case Condition::VS: return cpsr.v;
+        case Condition::VC: return !cpsr.v;
+        case Condition::HI: return cpsr.c && !cpsr.z;
+        case Condition::LS: return cpsr.z && !cpsr.c;
+        case Condition::GE: return cpsr.n == cpsr.v;
+        case Condition::LT: return cpsr.n != cpsr.v;
+        case Condition::GT: return (cpsr.n == cpsr.v) && !cpsr.z;
+        case Condition::LE: return (cpsr.n != cpsr.v) && cpsr.z;
+        case Condition::AL: return true;
+        case Condition::NV: return true; // Requires special handling on ARM9
+    }
+}
 
 /* Sets bit op flags */
 void setBitFlags(CPU *cpu, u32 c) {
@@ -51,6 +86,14 @@ void setBitFlags(CPU *cpu, u32 c) {
     cpu->cpsr.z = !c;
     cpu->cpsr.c = cpu->cout; // Carry out of barrel shifter
     // V is left untouched
+}
+
+/* Sets ADD/CMN flags */
+void setAddFlags(CPU *cpu, u32 a, u32 b, u32 c) {
+    cpu->cpsr.n = c & (1 << 31);
+    cpu->cpsr.z = !c;
+    cpu->cpsr.c = ((u32)-1 - a) < b;
+    cpu->cpsr.v = !((a ^ b) & (1 << 31)) && ((a ^ c) & (1 << 31)); // Signed overflow if a & b have the same sign sign, and a & c have different signs
 }
 
 /* Sets SUB/RSB/CMP flags */
@@ -74,7 +117,7 @@ u32 rotateImm(CPU *cpu, u32 imm, u32 amt, bool isS) {
     return std::__rotr(imm, amt);
 }
 
-// Instruction handlers
+// Instruction handlers (ARM)
 
 /* Unhandled ARM state instruction */
 void aUnhandledInstruction(CPU *cpu, u32 instr) {
@@ -99,7 +142,7 @@ void aBLX(CPU *cpu, u32 instr) {
 
     const auto pc = cpu->get(CPUReg::PC);
 
-    cpu->r[CPUReg::LR] = pc;
+    cpu->r[CPUReg::LR] = pc - 4;
     cpu->r[CPUReg::PC] = pc + (offset | ((instr >> 23) & 2)); // PC += offset | (H << 1)
 
     cpu->cpsr.t = true;
@@ -121,7 +164,7 @@ void aBranch(CPU *cpu, u32 instr) {
 
     const auto pc = cpu->get(CPUReg::PC);
 
-    if constexpr (isLink) cpu->r[CPUReg::LR] = pc;
+    if constexpr (isLink) cpu->r[CPUReg::LR] = pc - 4;
 
     cpu->r[CPUReg::PC] = pc + offset;
 
@@ -210,6 +253,12 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             assert(false);
         }
     }
+}
+
+/* ARM state extra load-stores */
+template<ExtraLoadOpcode opcode, bool isP, bool isU, bool isI, bool isW>
+void aExtraLoad(CPU *cpu, u32 instr) {
+
 }
 
 /* Move to Status from Register */
@@ -312,7 +361,10 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
 
             cpu->r[rd] = cpu->read8(addr);
         } else {
-            assert(false);
+            assert(rd != CPUReg::PC); // Could happen, we'll implement this when we need it
+            assert(!(addr & 3));      // See above
+
+            cpu->r[rd] = cpu->read32(addr);
         }
     } else { // STR/STRB
         if (rd == 15) data += 4; // STR takes an extra cycle, which causes PC to be 12 bytes ahead
@@ -356,28 +408,93 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
     }
 }
 
-/* Returns true if the instruction passes the condition code test */
-bool testCond(CPU *cpu, Condition cond) {
-    auto &cpsr = cpu->cpsr;
+// Instruction handlers (THUMB)
 
-    switch (cond) {
-        case Condition::EQ: return cpsr.z;
-        case Condition::NE: return !cpsr.z;
-        case Condition::HS: return cpsr.c;
-        case Condition::LO: return !cpsr.c;
-        case Condition::MI: return cpsr.n;
-        case Condition::PL: return !cpsr.n;
-        case Condition::VS: return cpsr.v;
-        case Condition::VC: return !cpsr.v;
-        case Condition::HI: return cpsr.c && !cpsr.z;
-        case Condition::LS: return cpsr.z && !cpsr.c;
-        case Condition::GE: return cpsr.n == cpsr.v;
-        case Condition::LT: return cpsr.n != cpsr.v;
-        case Condition::GT: return (cpsr.n == cpsr.v) && !cpsr.z;
-        case Condition::LE: return (cpsr.n != cpsr.v) && cpsr.z;
-        case Condition::AL: return true;
-        case Condition::NV: return true; // Requires special handling on ARM9
+/* Unhandled THUMB state instruction */
+void tUnhandledInstruction(CPU *cpu, u16 instr) {
+    const auto opcode = (instr >> 6) & 0x3FF;
+
+    std::printf("[ARM%d:T    ] Unhandled instruction 0x%03X (0x%04X) @ 0x%08X\n", cpu->cpuID, opcode, instr, cpu->cpc);
+
+    exit(0);
+}
+
+/* THUMB Branch and Exchange */
+template<bool isLink>
+void tBranchExchange(CPU *cpu, u16 instr) {
+    // Get source register
+    const auto rm = (instr >> 3) & 0xF; // Includes H bit
+
+    assert(rm != CPUReg::PC); // Stoobit
+
+    if constexpr (isLink) cpu->r[CPUReg::LR] = cpu->r[CPUReg::PC];
+
+    cpu->r[CPUReg::PC] = cpu->r[rm];
+
+    cpu->cpsr.t = false;
+
+    if (doDisasm) {
+        if constexpr (isLink) {
+            std::printf("[ARM%d:T    ] [0x%08X] BLX %s; PC = 0x%08X, LR = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] BX %s; PC = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], cpu->r[CPUReg::PC]);
+        }
     }
+}
+
+/* THUMB conditional branch */
+void tConditionalBranch(CPU *cpu, u16 instr) {
+    // Get condition and offset
+    const auto cond = (Condition)((instr >> 8) & 0xF);
+
+    const auto offset = (i32)(i8)instr << 1;
+    const auto target = cpu->get(CPUReg::PC) + offset;
+
+    if (testCond(cpu, cond)) cpu->r[CPUReg::PC] = target;
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] B%s 0x%08X\n", cpu->cpuID, cpu->cpc, condNames[cond], target);
+}
+
+/* THUMB Data Processing (ADD/SUB/MOV/CMP) */
+template<DPOpcode opcode>
+void tDataProcessingLarge(CPU *cpu, u16 instr) {
+    static_assert((opcode == DPOpcode::ADD) || (opcode == DPOpcode::SUB) || (opcode == DPOpcode::MOV) || (opcode == DPOpcode::CMP));
+
+    // Get operands
+    const auto rd = (instr >> 8) & 7;
+
+    const auto imm = instr & 0xFF;
+
+    switch (opcode) {
+        case DPOpcode::ADD:
+            {
+                const auto res = cpu->r[rd] + imm;
+
+                setAddFlags(cpu, cpu->r[rd], imm, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
+        case DPOpcode::SUB:
+            {
+                const auto res = cpu->r[rd] - imm;
+
+                setSubFlags(cpu, cpu->r[rd], imm, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
+        case DPOpcode::MOV:
+            setBitFlags(cpu, imm);
+
+            cpu->r[rd] = imm;
+            break;
+        case DPOpcode::CMP:
+            setSubFlags(cpu, cpu->r[rd], imm, cpu->r[rd] - imm);
+            break;
+    }
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %s%s %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], (opcode != DPOpcode::CMP) ? "S" : "", regNames[rd], imm, regNames[rd], cpu->r[rd]);
 }
 
 void decodeUnconditional(CPU *cpu, u32 instr) {
@@ -418,9 +535,28 @@ void decodeARM(CPU *cpu) {
     instrTableARM[opcode](cpu, instr);
 }
 
+void decodeTHUMB(CPU *cpu) {
+    cpu->cpc = cpu->r[CPUReg::PC];
+
+    assert(!(cpu->cpc & 1));
+
+    // Fetch instruction, increment program counter
+    const auto instr = cpu->read16(cpu->cpc);
+
+    cpu->r[CPUReg::PC] += 2;
+
+    // Get opcode
+    const auto opcode = (instr >> 6) & 0x3FF;
+
+    instrTableTHUMB[opcode](cpu, instr);
+}
+
 void init() {
     // Populate instruction tables
-    for (auto &i : instrTableARM) i = &aUnhandledInstruction;
+
+    // ARM
+    for (auto &i : instrTableARM  ) i = &aUnhandledInstruction;
+    for (auto &i : instrTableTHUMB) i = &tUnhandledInstruction;
 
     for (int i = 0x000; i < 0x200; i++) {
         if (!(i & 1) && ((i & 0x191) != 0x100)) { // Don't include misc instructions
@@ -438,6 +574,44 @@ void init() {
             instrTableARM[i | 0x200] = &aDataProcessing<true, false, false>;
         }
     }
+
+    instrTableARM[0x00B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 0, 0>;
+    instrTableARM[0x02B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 0, 1>;
+    instrTableARM[0x04B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 1, 0>;
+    instrTableARM[0x06B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 1, 1>;
+    instrTableARM[0x08B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 1, 0, 0>;
+    instrTableARM[0x0AB] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 1, 0, 1>;
+    instrTableARM[0x0CB] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 1, 1, 0>;
+    instrTableARM[0x0EB] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 1, 1, 1>;
+    instrTableARM[0x10B] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 0, 0, 0>;
+    instrTableARM[0x12B] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 0, 0, 1>;
+    instrTableARM[0x14B] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 0, 1, 0>;
+    instrTableARM[0x16B] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 0, 1, 1>;
+    instrTableARM[0x18B] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 1, 0, 0>;
+    instrTableARM[0x1AB] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 1, 0, 1>;
+    instrTableARM[0x1CB] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 1, 1, 0>;
+    instrTableARM[0x1EB] = &aExtraLoad<ExtraLoadOpcode::STRH , 1, 1, 1, 1>;
+    instrTableARM[0x01B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 0, 0, 0>;
+    instrTableARM[0x03B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 0, 0, 1>;
+    instrTableARM[0x05B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 0, 1, 0>;
+    instrTableARM[0x07B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 0, 1, 1>;
+    instrTableARM[0x09B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 1, 0, 0>;
+    instrTableARM[0x0BB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 1, 0, 1>;
+    instrTableARM[0x0DB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 1, 1, 0>;
+    instrTableARM[0x0FB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 0, 1, 1, 1>;
+    instrTableARM[0x11B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 0, 0, 0>;
+    instrTableARM[0x13B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 0, 0, 1>;
+    instrTableARM[0x15B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 0, 1, 0>;
+    instrTableARM[0x17B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 0, 1, 1>;
+    instrTableARM[0x19B] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 0, 0>;
+    instrTableARM[0x1BB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 0, 1>;
+    instrTableARM[0x1DB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 1, 0>;
+    instrTableARM[0x1FB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 1, 1>;
+
+    //instrTableARM[0x00D] = &aExtraLoad<ExtraLoadOpcode::LDRD , 0, 0, 0, 0>;
+    //instrTableARM[0x00F] = &aExtraLoad<ExtraLoadOpcode::STRD , 0, 0, 0, 0>;
+    //instrTableARM[0x01D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 0, 0>;
+    //instrTableARM[0x01F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 0, 0>;
 
     instrTableARM[0x120] = &aMSR<false, false>;
     instrTableARM[0x160] = &aMSR<true , false>;
@@ -478,19 +652,74 @@ void init() {
             case 0x1E: instrTableARM[i] = &aSingleDataTransfer<1, 1, 1, 1, 0, 1>; break;
             case 0x1F: instrTableARM[i] = &aSingleDataTransfer<1, 1, 1, 1, 1, 1>; break;
         }
+
+        // Register SDT
+        if (!(i & 1)) {
+            switch ((i >> 4) & 0x1F) {
+                case 0x00: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 0, 0, 0, 0>; break;
+                case 0x01: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 0, 0, 1, 0>; break;
+                case 0x02: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 0, 1, 0, 0>; break;
+                case 0x03: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 0, 1, 1, 0>; break;
+                case 0x04: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 1, 0, 0, 0>; break;
+                case 0x05: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 1, 0, 1, 0>; break;
+                case 0x06: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 1, 1, 0, 0>; break;
+                case 0x07: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 0, 1, 1, 1, 0>; break;
+                case 0x08: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 0, 0, 0, 0>; break;
+                case 0x09: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 0, 0, 1, 0>; break;
+                case 0x0A: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 0, 1, 0, 0>; break;
+                case 0x0B: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 0, 1, 1, 0>; break;
+                case 0x0C: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 1, 0, 0, 0>; break;
+                case 0x0D: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 1, 0, 1, 0>; break;
+                case 0x0E: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 1, 1, 0, 0>; break;
+                case 0x0F: instrTableARM[i | 0x200] = &aSingleDataTransfer<0, 1, 1, 1, 1, 0>; break;
+                case 0x10: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 0, 0, 0, 0>; break;
+                case 0x11: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 0, 0, 1, 0>; break;
+                case 0x12: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 0, 1, 0, 0>; break;
+                case 0x13: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 0, 1, 1, 0>; break;
+                case 0x14: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 1, 0, 0, 0>; break;
+                case 0x15: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 1, 0, 1, 0>; break;
+                case 0x16: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 1, 1, 0, 0>; break;
+                case 0x17: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 0, 1, 1, 1, 0>; break;
+                case 0x18: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 0, 0, 0, 0>; break;
+                case 0x19: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 0, 0, 1, 0>; break;
+                case 0x1A: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 0, 1, 0, 0>; break;
+                case 0x1B: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 0, 1, 1, 0>; break;
+                case 0x1C: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 1, 0, 0, 0>; break;
+                case 0x1D: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 1, 0, 1, 0>; break;
+                case 0x1E: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 1, 1, 0, 0>; break;
+                case 0x1F: instrTableARM[i | 0x200] = &aSingleDataTransfer<1, 1, 1, 1, 1, 0>; break;
+            }
+        }
     }
 
     for (int i = 0xA00; i < 0xB00; i++) {
         instrTableARM[i | 0x000] = &aBranch<false>;
         instrTableARM[i | 0x100] = &aBranch<true>;
     }
+
+    // THUMB
+    for (int i = 0x080; i < 0x0A0; i++) {
+        instrTableTHUMB[i | (0 << 5)] = &tDataProcessingLarge<DPOpcode::MOV>;
+        instrTableTHUMB[i | (1 << 5)] = &tDataProcessingLarge<DPOpcode::CMP>;
+        instrTableTHUMB[i | (2 << 5)] = &tDataProcessingLarge<DPOpcode::ADD>;
+        instrTableTHUMB[i | (3 << 5)] = &tDataProcessingLarge<DPOpcode::SUB>;
+    }
+
+    instrTableTHUMB[0x11C] = &tBranchExchange<false>;
+    instrTableTHUMB[0x11D] = &tBranchExchange<false>;
+    instrTableTHUMB[0x11E] = &tBranchExchange<true>;
+    instrTableTHUMB[0x11F] = &tBranchExchange<true>;
+
+    for (int i = 0x340; i < 0x380; i++) {
+        if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
+            instrTableTHUMB[i] = &tConditionalBranch;
+        }
+    }
 }
 
 void run(CPU *cpu, i64 runCycles) {
     for (auto c = runCycles; c > 0; c--) {
-        assert(!cpu->cpsr.t); // TODO: implement THUMB
-
-        decodeARM(cpu);
+        (cpu->cpsr.t) ? decodeTHUMB(cpu) : decodeARM(cpu);
     }
 }
 

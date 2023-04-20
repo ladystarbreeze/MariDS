@@ -108,6 +108,7 @@ struct CPU {
     bool cout; // Carry out
 
     u8  (*read8 )(u32);
+    u16 (*read16)(u32);
     u32 (*read32)(u32);
 
     void (*write32)(u32, u32);

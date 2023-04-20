@@ -33,6 +33,7 @@ CPU::CPU(int cpuID) {
         r[CPUReg::PC] = static_cast<u32>(VectorBase::ARM9);
 
         read8  = &bus::read8ARM9;
+        read16 = &bus::read16ARM9;
         read32 = &bus::read32ARM9;
 
         write32 = &bus::write32ARM9;
@@ -57,7 +58,7 @@ CPU::~CPU() {}
 u32 CPU::get(u32 idx) {
     assert(idx < 16);
 
-    return (idx == 15) ? r[idx] + 4 : r[idx];
+    return (idx == 15) ? r[idx] + ((cpsr.t) ? 2 : 4) : r[idx];
 }
 
 /* Changes CPU mode, swaps register banks */
