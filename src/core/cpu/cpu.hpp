@@ -104,6 +104,8 @@ struct CPU {
     PSR cpsr;
     PSR *cspsr;
 
+    bool cout; // Carry out
+
     u32 (*read32)(u32);
 
     u32 get(u32 idx);
