@@ -36,6 +36,7 @@ CPU::CPU(int cpuID) {
         read16 = &bus::read16ARM9;
         read32 = &bus::read32ARM9;
 
+        write16 = &bus::write16ARM9;
         write32 = &bus::write32ARM9;
     }
 

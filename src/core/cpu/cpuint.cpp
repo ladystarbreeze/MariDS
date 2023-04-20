@@ -24,6 +24,10 @@ constexpr const char *dpNames[] = {
     "TST", "TEQ", "CMP", "CMN", "ORR", "MOV", "BIC", "MVN",
 };
 
+constexpr const char *extraLoadNames[] = {
+    "N/A", "STRH", "LDRD", "STRD", "N/A", "LDRH", "LDRSB", "LDRSH",
+};
+
 constexpr const char *regNames[] = {
     "R0", "R1", "R2" , "R3" , "R4" , "R5", "R6", "R7",
     "R8", "R9", "R10", "R11", "R12", "SP", "LR", "PC",
@@ -258,7 +262,88 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 /* ARM state extra load-stores */
 template<ExtraLoadOpcode opcode, bool isP, bool isU, bool isI, bool isW>
 void aExtraLoad(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rd = (instr >> 12) & 0xF;
+    const auto rn = (instr >> 16) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
 
+    assert((rd != CPUReg::PC) && (rn != CPUReg::PC));
+
+    auto addr = cpu->get(rn);
+    auto data = cpu->get(rd);
+
+    assert(!(!isP && isW)); // ???
+
+    u32 offset;
+
+    if constexpr (isI) {
+        offset = ((instr >> 4) & 0xF0) | (instr & 0xF);
+    } else {
+        assert(rm != CPUReg::PC);
+
+        offset = cpu->get(rm);
+    }
+
+    // Handle pre-index
+    if constexpr (isP) {
+        if constexpr (isU) {
+            addr += offset;
+        } else {
+            addr -= offset;
+        }
+    }
+
+    switch (opcode) {
+        case ExtraLoadOpcode::STRH:
+            assert(rd != CPUReg::PC);
+
+            cpu->write16(addr, data);
+            break;
+        case ExtraLoadOpcode::LDRH:
+            assert(rd != CPUReg::PC);
+
+            cpu->r[rd] = cpu->read16(addr);
+            break;
+        default:
+            std::printf("[ARM%d      ] Unhandled Extra Load opcode %s\n", cpu->cpuID, extraLoadNames[opcode]);
+
+            exit(0);
+    }
+
+    // Handle post-index & writeback
+    if (((opcode == ExtraLoadOpcode::STRH) || (opcode == ExtraLoadOpcode::STRD)) || (rn != rd)) {
+        if constexpr (!isP) {
+            assert(rn != CPUReg::PC); // Shouldn't happen
+
+            if constexpr (isU) {
+                addr += offset;
+            } else {
+                addr -= offset;
+            }
+
+            cpu->r[rn] = addr;
+        } else if constexpr (isW) {
+            cpu->r[rn] = addr;
+        }
+    }
+
+    if (doDisasm) {
+        constexpr const char *elNames[] = {
+            "N/A", "H", "D", "D", "N/A", "H", "SB", "SH",
+        };
+
+        assert(isI);
+
+        const auto cond = condNames[instr >> 28];
+
+        if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
+            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%02X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[opcode], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+        } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
+            std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[opcode], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
+        } else {
+            assert(false); // TODO: LDRD/STRD
+        }
+    }
 }
 
 /* Move to Status from Register */

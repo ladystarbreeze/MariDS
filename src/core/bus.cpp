@@ -89,6 +89,20 @@ u32 read32ARM9(u32 addr) {
     return data;
 }
 
+void write16ARM9(u32 addr, u16 data) {
+    assert(!(addr & 1));
+
+    switch (addr) {
+        case static_cast<u32>(Memory9Base::MMIO) + 0x204:
+            std::printf("[Bus:ARM9  ] Write16 @ EXMEMCNT = 0x%04X\n", data);
+            break;
+        default:
+            std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
+
+            exit(0);
+    }
+}
+
 void write32ARM9(u32 addr, u32 data) {
     assert(!(addr & 3));
 

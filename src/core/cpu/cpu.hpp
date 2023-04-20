@@ -111,6 +111,7 @@ struct CPU {
     u16 (*read16)(u32);
     u32 (*read32)(u32);
 
+    void (*write16)(u32, u16);
     void (*write32)(u32, u32);
 
     u32 get(u32 idx);
