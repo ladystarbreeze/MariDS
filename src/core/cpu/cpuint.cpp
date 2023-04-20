@@ -260,27 +260,37 @@ void aUnhandledInstruction(CPU *cpu, u32 instr) {
 /* ARM state BLX */
 template<bool isImm>
 void aBLX(CPU *cpu, u32 instr) {
-    if constexpr (!isImm) {
-        std::printf("[ARM%d      ] Unhandled register BLX instruction 0x%08X\n", cpu->cpuID, instr);
-
-        exit(0);
-    }
-
-    // Get offset
-    const auto offset = (i32)(instr << 8) >> 6;
+    // Get source register (for register BLX)
+    const auto rm = instr & 0xF;
 
     const auto pc = cpu->get(CPUReg::PC);
 
     cpu->r[CPUReg::LR] = pc - 4;
-    cpu->r[CPUReg::PC] = pc + (offset | ((instr >> 23) & 2)); // PC += offset | (H << 1)
 
-    cpu->cpsr.t = true;
+    u32 offset;
+
+    if constexpr (isImm) {
+        // Get offset
+        offset = (i32)(instr << 8) >> 6;
+
+        cpu->r[CPUReg::PC] = pc + (offset | ((instr >> 23) & 2)); // PC += offset | (H << 1)
+
+        cpu->cpsr.t = true;
+    } else {
+        assert(rm != CPUReg::PC);
+
+        const auto target = cpu->r[rm];
+
+        cpu->cpsr.t = target & 1;
+
+        cpu->r[CPUReg::PC] = target & ~1;
+    }
 
     if (doDisasm) {
         if constexpr (isImm) {
             std::printf("[ARM%d      ] [0x%08X] BLX 0x%08X; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
         } else {
-            assert(false);
+            std::printf("[ARM%d      ] [0x%08X] BLX %s; PC = 0x%08X, LR = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
         }
     }
 }
@@ -612,7 +622,7 @@ void aMSR(CPU *cpu, u32 instr) {
         if (mask & 1) {
             const auto newMode = (CPUMode)(op & 0xF);
 
-            if (mask & 1) cpu->changeMode(newMode);
+            cpu->changeMode(newMode);
         }
 
         cpu->cpsr.set(mask, op);
@@ -978,6 +988,7 @@ void init() {
     instrTableARM[0x160] = &aMSR<true , false>;
     
     instrTableARM[0x121] = &aBX;
+    instrTableARM[0x123] = &aBLX<false>;
 
     for (int i = 0x400; i < 0x600; i++) {
         // Immediate SDT
