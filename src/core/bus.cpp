@@ -9,12 +9,20 @@
 
 #include "../common/file.hpp"
 
+namespace nds::bus {
+
 // NDS memory regions
 
 /* ARM9 base addresses */
 enum class Memory9Base : u32 {
+    Main = 0x02000000,
     MMIO = 0x04000000,
     BIOS = 0xFFFF0000,
+};
+
+/* ARM9 memory limits */
+enum class Memory9Limit : u32 {
+    Main = 0x00400000,
 };
 
 // NDS ARM7 memory
@@ -27,11 +35,16 @@ std::vector<u8> bios9;
 
 // NDS shared memory
 
+std::vector<u8> mainMem;
+
 // Registers
 
 u8 postflg9;
 
-namespace nds::bus {
+/* Returns true if address is in range [base;limit] */
+bool inRange(u64 addr, u64 base, u64 limit) {
+    return (addr >= base) && (addr < (base + limit));
+}
 
 void init(const char *bios7Path, const char *bios9Path) {
     bios7 = loadBinary(bios7Path);
@@ -39,6 +52,8 @@ void init(const char *bios7Path, const char *bios9Path) {
 
     assert(bios7.size() == 0x4000); // 16KB
     assert(bios9.size() == 0x1000); // 4KB
+
+    mainMem.resize(static_cast<u32>(Memory9Limit::Main));
 
     postflg9 = 0;
 
@@ -61,8 +76,9 @@ u16 read16ARM9(u32 addr) {
     assert(!(addr & 1));
     
     u16 data;
-
-    if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::Main), 2 * static_cast<u32>(Memory9Limit::Main))) {
+        std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], sizeof(u16));
+    } else if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
         std::memcpy(&data, &bios9[addr & 0xFFE], sizeof(u16));
     } else {
         std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
@@ -92,14 +108,18 @@ u32 read32ARM9(u32 addr) {
 void write16ARM9(u32 addr, u16 data) {
     assert(!(addr & 1));
 
-    switch (addr) {
-        case static_cast<u32>(Memory9Base::MMIO) + 0x204:
-            std::printf("[Bus:ARM9  ] Write16 @ EXMEMCNT = 0x%04X\n", data);
-            break;
-        default:
-            std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
+    if (inRange(addr, static_cast<u32>(Memory9Base::Main), 2 * static_cast<u32>(Memory9Limit::Main))) {
+        std::memcpy(&mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], &data, sizeof(u16));
+    } else {
+        switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x204:
+                std::printf("[Bus:ARM9  ] Write16 @ EXMEMCNT = 0x%04X\n", data);
+                break;
+            default:
+                std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
 
-            exit(0);
+                exit(0);
+        }
     }
 }
 
