@@ -18,10 +18,12 @@ enum class VectorBase : u32 {
     ARM9 = 0xFFFF0000,
 };
 
-CPU::CPU(int cpuID) {
+CPU::CPU(int cpuID, CP15 *cp15) {
     assert((cpuID == 7) || (cpuID == 9));
 
     this->cpuID = cpuID;
+
+    this->cp15 = cp15;
 
     std::memset(&r, 0, sizeof(r));
 

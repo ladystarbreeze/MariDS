@@ -37,6 +37,10 @@ constexpr const char *shiftNames[] = {
     "LSL", "LSR", "ASR", "ROR",
 };
 
+constexpr const char *thumbLoadNames[] = {
+    "STR",
+};
+
 /* Condition codes */
 enum Condition {
     EQ, NE, HS, LO, MI, PL, VS, VC,
@@ -57,6 +61,11 @@ enum ExtraLoadOpcode {
     LDRH  = 5,
     LDRSB = 6,
     LDRSH = 7,
+};
+
+/* THUMB loadstores */
+enum THUMBLoadOpcode {
+    STR,
 };
 
 enum ShiftType {
@@ -331,6 +340,8 @@ void aCoprocessorRegisterTransfer(CPU *cpu, u32 instr) {
     const auto rd = (instr >> 12) & 0xF;
     const auto rm = (instr >>  0) & 0xF;
 
+    assert(rd != CPUReg::PC);
+
     const auto opcode1 = (instr >> 21) & 7;
     const auto opcode2 = (instr >>  5) & 7;
 
@@ -339,6 +350,16 @@ void aCoprocessorRegisterTransfer(CPU *cpu, u32 instr) {
     assert(cpNum == 15);
 
     // TODO: emulate CP15 accesses
+
+    assert(cpu->cp15);
+
+    const auto idx = (opcode1 << 12) | (rn << 8) | (rm << 4) | opcode2;
+
+    if constexpr (isL) {
+        cpu->r[rd] = cpu->cp15->get(idx);
+    } else {
+        cpu->cp15->set(idx, cpu->r[rd]);
+    }
 
     if (doDisasm) {
         const auto cond = condNames[instr >> 28];
@@ -571,7 +592,7 @@ void aMSR(CPU *cpu, u32 instr) {
 
     auto mask = (instr >> 16) & 0xF;
 
-    if (cpu->cpsr.mode == CPUMode::USR) mask ^= 1; // User mode doesn't have privileges to change the control bits
+    if (cpu->cpsr.mode == CPUMode::USR) mask &= ~1; // User mode doesn't have privileges to change the control bits
 
     u32 op;
 
@@ -588,11 +609,13 @@ void aMSR(CPU *cpu, u32 instr) {
         
         cpu->cspsr->set(mask, op);
     } else {
-        const auto newMode = (CPUMode)(op & 0xF);
+        if (mask & 1) {
+            const auto newMode = (CPUMode)(op & 0xF);
 
-        cpu->cpsr.set(mask, op & ~0xF);
+            if (mask & 1) cpu->changeMode(newMode);
+        }
 
-        cpu->changeMode(newMode);
+        cpu->cpsr.set(mask, op);
     }
 
     if (doDisasm) {
@@ -789,6 +812,50 @@ void tDataProcessingLarge(CPU *cpu, u16 instr) {
     }
 
     if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %s%s %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], (opcode != DPOpcode::CMP) ? "S" : "", regNames[rd], imm, regNames[rd], cpu->r[rd]);
+}
+
+/* Load from literal pool */
+void tLoadFromPool(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 8) & 7;
+
+    const auto offset = (i32)(i8)instr << 2;
+
+    const auto addr = (cpu->get(CPUReg::PC) & ~3) + offset;
+
+    cpu->r[rd] = cpu->read32(addr);
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] LDR %s, [0x%08X]; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], addr, regNames[rd], cpu->r[rd]);
+}
+
+/* Load/store with register offset */
+template<THUMBLoadOpcode opcode>
+void tLoadRegisterOffset(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 0) & 7;
+    const auto rn = (instr >> 3) & 7;
+    const auto rm = (instr >> 6) & 7;
+
+    const auto addr = cpu->r[rn] + cpu->r[rm];
+    const auto data = cpu->r[rd];
+
+    switch (opcode) {
+        case THUMBLoadOpcode::STR:
+            cpu->write32(addr & ~3, data);
+            break;
+        default:
+            std::printf("[ARM%d:T    ] Unhandled register offset load instruction 0x%04X @ 0x%08X\n", cpu->cpuID, instr, cpu->cpc);
+
+            exit(0);
+    }
+
+    if (doDisasm) {
+        if constexpr (opcode == THUMBLoadOpcode::STR) {
+            std::printf("[ARM%d:T    ] [0x%08X] STR %s, [%s, %s]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], regNames[rm], addr, regNames[rd], data);
+        } else {
+            assert(false);
+        }
+    }
 }
 
 void decodeUnconditional(CPU *cpu, u32 instr) {
@@ -1016,6 +1083,16 @@ void init() {
     instrTableTHUMB[0x11E] = &tBranchExchange<true>;
     instrTableTHUMB[0x11F] = &tBranchExchange<true>;
 
+    for (int i = 0x120; i < 0x140; i++) {
+        instrTableTHUMB[i] = &tLoadFromPool;
+    }
+
+    for (int i = 0x140; i < 0x180; i++) {
+        switch ((i >> 9) & 7) {
+            case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR>; break;
+        }
+    }
+
     for (int i = 0x340; i < 0x380; i++) {
         if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
             instrTableTHUMB[i] = &tConditionalBranch;
@@ -1026,6 +1103,8 @@ void init() {
 void run(CPU *cpu, i64 runCycles) {
     for (auto c = runCycles; c > 0; c--) {
         (cpu->cpsr.t) ? decodeTHUMB(cpu) : decodeARM(cpu);
+
+        assert(cpu->r[CPUReg::PC]);
     }
 }
 

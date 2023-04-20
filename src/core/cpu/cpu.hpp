@@ -8,9 +8,12 @@
 #include <cassert>
 #include <cstdio>
 
+#include "cp15.hpp"
 #include "../../common/types.hpp"
 
 namespace nds::cpu {
+
+using CP15 = cp15::CP15;
 
 // PSR
 
@@ -94,10 +97,12 @@ enum CPUReg {
 };
 
 struct CPU {
-    CPU(int cpuID);
+    CPU(int cpuID, CP15 *cp15);
     ~CPU();
 
     int cpuID;
+
+    CP15 *cp15;
 
     u32 r[16];
     u32 cpc;
@@ -120,8 +125,6 @@ struct CPU {
     void changeMode(CPUMode newMode);
 
 private:
-    //CP15 *cp15;
-
     u32 rFIQ[5];
 
     u32 spFIQ, spSVC, spABT, spIRQ, spUND;

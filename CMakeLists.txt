@@ -13,6 +13,7 @@ set(SOURCES
     src/core/MariDS.cpp
     src/core/cpu/cpu.cpp
     src/core/cpu/cpuint.cpp
+    src/core/cpu/cp15.cpp
 )
 
 set(HEADERS
@@ -22,6 +23,7 @@ set(HEADERS
     src/core/MariDS.hpp
     src/core/cpu/cpu.hpp
     src/core/cpu/cpuint.hpp
+    src/core/cpu/cp15.hpp
 )
 
 add_executable(MariDS ${SOURCES} ${HEADERS})

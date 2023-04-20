@@ -15,6 +15,7 @@ namespace nds::bus {
 
 /* ARM9 base addresses */
 enum class Memory9Base : u32 {
+    DTCM = 0x00800000,
     Main = 0x02000000,
     MMIO = 0x04000000,
     BIOS = 0xFFFF0000,
@@ -22,6 +23,7 @@ enum class Memory9Base : u32 {
 
 /* ARM9 memory limits */
 enum class Memory9Limit : u32 {
+    DTCM = 0x00004000,
     Main = 0x00400000,
 };
 
@@ -32,6 +34,8 @@ std::vector<u8> bios7;
 // NDS ARM9 memory
 
 std::vector<u8> bios9;
+
+u8 dtcm[static_cast<u32>(Memory9Limit::DTCM)];
 
 // NDS shared memory
 
@@ -142,17 +146,21 @@ void write16ARM9(u32 addr, u16 data) {
 void write32ARM9(u32 addr, u32 data) {
     assert(!(addr & 3));
 
-    switch (addr) {
-        case static_cast<u32>(Memory9Base::MMIO) + 0x1A0:
-            std::printf("[Bus:ARM9  ] Write32 @ AUXSPICNT/AUXSPIDATA = 0x%08X\n", data);
-            break;
-        case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
-            std::printf("[Bus:ARM9  ] Write32 @ ROMCNT = 0x%08X\n", data);
-            break;
-        default:
-            std::printf("[Bus:ARM9  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
+    if (inRange(addr, static_cast<u32>(Memory9Base::DTCM), static_cast<u32>(Memory9Limit::DTCM))) {
+        std::memcpy(&dtcm[addr & (static_cast<u32>(Memory9Limit::DTCM) - 1)], &data, sizeof(u32));
+    } else {
+        switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1A0:
+                std::printf("[Bus:ARM9  ] Write32 @ AUXSPICNT/AUXSPIDATA = 0x%08X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
+                std::printf("[Bus:ARM9  ] Write32 @ ROMCNT = 0x%08X\n", data);
+                break;
+            default:
+                std::printf("[Bus:ARM9  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
 
-            exit(0);
+                exit(0);
+        }
     }
 }
 
