@@ -33,6 +33,10 @@ constexpr const char *regNames[] = {
     "R8", "R9", "R10", "R11", "R12", "SP", "LR", "PC",
 };
 
+constexpr const char *shiftNames[] = {
+    "LSL", "LSR", "ASR", "ROR",
+};
+
 /* Condition codes */
 enum Condition {
     EQ, NE, HS, LO, MI, PL, VS, VC,
@@ -53,6 +57,10 @@ enum ExtraLoadOpcode {
     LDRH  = 5,
     LDRSB = 6,
     LDRSH = 7,
+};
+
+enum ShiftType {
+    LSL, LSR, ASR, ROR,
 };
 
 std::array<void (*)(CPU *, u32), 4096> instrTableARM;
@@ -110,13 +118,121 @@ void setSubFlags(CPU *cpu, u32 a, u32 b, u32 c) {
 
 // Barrel shifter
 
+/* Performs an arithmetic right shift */
+template<bool isImm>
+u32 doASR(CPU *cpu, u32 data, u32 amt) {
+    if (!amt) {
+        if constexpr (isImm) { // Don't set any flags
+            cpu->cout = cpu->cpsr.c;
+        
+            return data;
+        }
+
+        amt = 32;
+    }
+
+    if (amt >= 32) {
+        const auto sign = data >> 31;
+
+        cpu->cout = sign;
+
+        return -1 * sign;
+    }
+
+    cpu->cout = (data >> (amt - 1)) & 1;
+
+    return (i32)data >> amt;
+}
+
+/* Performs a left shift */
+u32 doLSL(CPU *cpu, u32 data, u32 amt) {
+    if (!amt) { // Don't set any flags
+        cpu->cout = cpu->cpsr.c;
+        
+        return data;
+    }
+
+    if (amt >= 32) {
+        cpu->cout = (amt > 32) ? false : data & 1;
+
+        return 0;
+    }
+
+    cpu->cout = ((data << (amt - 1)) >> 31) & 1;
+
+    return data << amt;
+}
+
+/* Performs a right shift */
+template<bool isImm>
+u32 doLSR(CPU *cpu, u32 data, u32 amt) {
+    if (!amt) {
+        if constexpr (isImm) { // Don't set any flags
+            cpu->cout = cpu->cpsr.c;
+        
+            return data;
+        }
+
+        amt = 32;
+    }
+
+    if (amt >= 32) {
+        cpu->cout = (amt > 32) ? false : data >> 31;
+
+        return 0;
+    }
+
+    cpu->cout = (data >> (amt - 1)) & 1;
+
+    return data >> amt;
+}
+
+/* Performs a right rotation */
+template<bool isImm>
+u32 doROR(CPU *cpu, u32 data, u32 amt) {
+    if (!isImm || amt) {
+        if (!amt) {
+            cpu->cout = cpu->cpsr.c;
+
+            return data;
+        }
+
+        amt &= 0x1F;
+
+        data = (data >> (amt - 1)) | (data << (31 - amt));
+
+        cpu->cout = data & 1;
+
+        return (data >> 1) || (data << 31);
+    } else {
+        cpu->cout = data & 1;
+
+        return (data >> 1) | (cpu->cpsr.c << 31);
+    }
+}
+
+/* Shifts a register by an immediate/register-specified amount */
+template<ShiftType stype, bool isImm>
+u32 shift(CPU *cpu, u32 data, u32 amt) {
+    switch (stype) {
+        case ShiftType::LSL: return doLSL(cpu, data, amt & 0xFF);
+        case ShiftType::LSR: return doLSR<isImm>(cpu, data, amt & 0xFF);
+        case ShiftType::ASR: return doASR<isImm>(cpu, data, amt & 0xFF);
+        case ShiftType::ROR: return doROR<isImm>(cpu, data, amt & 0xFF);
+    }
+}
+
 /* Rotates an 8-bit immediate by 2 * amt, sets carry out */
-u32 rotateImm(CPU *cpu, u32 imm, u32 amt, bool isS) {
-    if (!amt) return imm; // Don't set any flags
+u32 rotateImm(CPU *cpu, u32 imm, u32 amt) {
+    if (!amt) { // Don't set any flags
+        cpu->cout = cpu->cpsr.c;
+
+        return imm;
+    }
 
     amt <<= 1;
 
-    if (isS) cpu->cout = imm & (1 << (amt - 1));
+    cpu->cout = imm & (1 << (amt - 1));
 
     return std::__rotr(imm, amt);
 }
@@ -186,7 +302,7 @@ void aBranch(CPU *cpu, u32 instr) {
 /* ARM state data processing */
 template<bool isImm, bool isImmShift, bool isRegShift>
 void aDataProcessing(CPU *cpu, u32 instr) {
-    if constexpr (isImmShift || isRegShift) {
+    if constexpr (isRegShift) {
         std::printf("[ARM%d      ] Unhandled data processing instruction 0x%08X\n", cpu->cpuID, instr);
         std::printf("IsImm = %d, IsImmShift = %d, IsRegShift = %d\n", isImm, isImmShift, isRegShift);
 
@@ -196,6 +312,10 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     // Get operands and opcode
     const auto rd = (instr >> 12) & 0xF;
     const auto rn = (instr >> 16) & 0xF;
+    const auto rs = (instr >>  8) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+
+    assert(rd != CPUReg::PC);
 
     const auto opcode = (DPOpcode)((instr >> 21) & 0xF);
 
@@ -205,15 +325,31 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
     // Decode op2
     u32 op2;
+    u32 amt; // Shift amount
+
+    const auto stype = (ShiftType)((instr >> 5) & 3);
 
     if constexpr (isImm) {
         // op2 is a rotated immediate
         const auto amt = (instr >> 8) & 0xF;
         const auto imm = instr & 0xFF;
 
-        op2 = rotateImm(cpu, imm, amt, isS);
+        op2 = rotateImm(cpu, imm, amt);
     } else {
-        assert(false);
+        op2 = cpu->get(rm);
+
+        if constexpr (isImmShift) {
+            amt = (instr >> 7) & 0x1F;
+        } else {
+            assert(false);
+        }
+
+        switch (stype) {
+            case ShiftType::LSL: op2 = shift<ShiftType::LSL, isImm>(cpu, op2, amt); break;
+            case ShiftType::LSR: op2 = shift<ShiftType::LSR, isImm>(cpu, op2, amt); break;
+            case ShiftType::ASR: op2 = shift<ShiftType::ASR, isImm>(cpu, op2, amt); break;
+            case ShiftType::ROR: op2 = shift<ShiftType::ROR, isImm>(cpu, op2, amt); break;
+        }
     }
 
     switch (opcode) {
@@ -247,14 +383,26 @@ void aDataProcessing(CPU *cpu, u32 instr) {
                     std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rn], op2, regNames[rn], cpu->get(rn));
                     break;
                 case DPOpcode::MOV: case DPOpcode::MVN:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], op2, regNames[rd], cpu->get(rd));
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], op2, regNames[rd], cpu->r[rd]);
                     break;
                 default:
                     assert(false);
             }
-
         } else {
-            assert(false);
+            if constexpr (isImmShift) {
+                switch (opcode) {
+                    case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rn], regNames[rm], shiftNames[stype], amt, regNames[rn], cpu->get(rn));
+                        break;
+                    case DPOpcode::MOV: case DPOpcode::MVN:
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], regNames[rm], shiftNames[stype], amt, regNames[rd], cpu->r[rd]);
+                        break;
+                    default:
+                        assert(false);
+                }
+            } else {
+                assert(false);
+            }
         }
     }
 }
