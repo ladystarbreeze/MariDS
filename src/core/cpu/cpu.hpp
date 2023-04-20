@@ -110,6 +110,8 @@ struct CPU {
     u8  (*read8 )(u32);
     u32 (*read32)(u32);
 
+    void (*write32)(u32, u32);
+
     u32 get(u32 idx);
 
     void changeMode(CPUMode newMode);

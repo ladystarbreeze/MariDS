@@ -34,6 +34,8 @@ CPU::CPU(int cpuID) {
 
         read8  = &bus::read8ARM9;
         read32 = &bus::read32ARM9;
+
+        write32 = &bus::write32ARM9;
     }
 
     // Set initial CPSR

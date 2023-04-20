@@ -85,6 +85,34 @@ void aUnhandledInstruction(CPU *cpu, u32 instr) {
     exit(0);
 }
 
+/* ARM state BLX */
+template<bool isImm>
+void aBLX(CPU *cpu, u32 instr) {
+    if constexpr (!isImm) {
+        std::printf("[ARM%d      ] Unhandled register BLX instruction 0x%08X\n", cpu->cpuID, instr);
+
+        exit(0);
+    }
+
+    // Get offset
+    const auto offset = (i32)(instr << 8) >> 6;
+
+    const auto pc = cpu->get(CPUReg::PC);
+
+    cpu->r[CPUReg::LR] = pc;
+    cpu->r[CPUReg::PC] = pc + (offset | ((instr >> 23) & 2)); // PC += offset | (H << 1)
+
+    cpu->cpsr.t = true;
+
+    if (doDisasm) {
+        if constexpr (isImm) {
+            std::printf("[ARM%d      ] [0x%08X] BLX 0x%08X; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
+        } else {
+            assert(false);
+        }
+    }
+}
+
 /* ARM state Branch (and Link) */
 template<bool isLink>
 void aBranch(CPU *cpu, u32 instr) {
@@ -98,10 +126,12 @@ void aBranch(CPU *cpu, u32 instr) {
     cpu->r[CPUReg::PC] = pc + offset;
 
     if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
         if constexpr (isLink) {
-            std::printf("[ARM%d      ] [0x%08X] BL%s 0x%08X; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, condNames[instr >> 28], cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
+            std::printf("[ARM%d      ] [0x%08X] BL%s 0x%08X; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
         } else {
-            std::printf("[ARM%d      ] [0x%08X] B%s 0x%08X\n", cpu->cpuID, cpu->cpc, condNames[instr >> 28], cpu->r[CPUReg::PC]);
+            std::printf("[ARM%d      ] [0x%08X] B%s 0x%08X\n", cpu->cpuID, cpu->cpc, cond, cpu->r[CPUReg::PC]);
         }
     }
 }
@@ -140,6 +170,11 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 
     switch (opcode) {
+        case DPOpcode::TEQ:
+            assert(isS); // Safeguard
+
+            setBitFlags(cpu, op1 ^ op2);
+            break;
         case DPOpcode::CMP:
             assert(isS); // Safeguard
 
@@ -177,6 +212,64 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 }
 
+/* Move to Status from Register */
+template<bool isR, bool isImm>
+void aMSR(CPU *cpu, u32 instr) {
+    if constexpr (isImm) {
+        std::printf("[ARM%d      ] Unhandled immediate MSR instruction 0x%08X\n", cpu->cpuID, instr);
+
+        exit(0);
+    }
+
+    // Get operands
+    const auto rm = instr & 0xF;
+
+    assert(rm != CPUReg::PC); // Would be a bit weird
+
+    auto mask = (instr >> 16) & 0xF;
+
+    if (cpu->cpsr.mode == CPUMode::USR) mask ^= 1; // User mode doesn't have privileges to change the control bits
+
+    u32 op;
+
+    if constexpr (isImm) {
+        assert(false);
+    } else {
+        assert(rm != CPUReg::PC);
+
+        op = cpu->get(rm);
+    }
+
+    if constexpr (isR) {
+        assert(cpu->cspsr);
+        
+        cpu->cspsr->set(mask, op);
+    } else {
+        const auto newMode = (CPUMode)(op & 0xF);
+
+        cpu->cpsr.set(mask, op & ~0xF);
+
+        cpu->changeMode(newMode);
+    }
+
+    if (doDisasm) {
+        constexpr const char *maskNames[] = {
+            ""  , "C"  , "X"  , "CX"  ,
+            "S" , "CS" , "XS" , "CXS" ,
+            "F" , "CF" , "XF" , "CXF" ,
+            "SF", "CSF", "XSF", "CXSF",
+        };
+
+        const auto cond = condNames[instr >> 28];
+
+        if constexpr (isImm) {
+            assert(false);
+        } else {
+            std::printf("[ARM%d      ] [0x%08X] MSR%s %sPSR_%s, %s; %sPSR = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isR) ? "S" : "C", maskNames[mask], regNames[rm], (isR) ? "S" : "C", op);
+        }
+    }
+}
+
 /* ARM state Single Data Transfer */
 template<bool isP, bool isU, bool isB, bool isW, bool isL, bool isImm>
 void aSingleDataTransfer(CPU *cpu, u32 instr) {
@@ -191,8 +284,7 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
     const auto rn = (instr >> 16) & 0xF;
 
     auto addr = cpu->get(rn);
-
-    if constexpr (!isL) const auto data = cpu->get(rd);
+    auto data = cpu->get(rd);
 
     assert(!(!isP && isW)); // Unprivileged transfer?
 
@@ -222,8 +314,14 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
         } else {
             assert(false);
         }
-    } else {
-        assert(false);
+    } else { // STR/STRB
+        if (rd == 15) data += 4; // STR takes an extra cycle, which causes PC to be 12 bytes ahead
+
+        if constexpr (isB) {
+            assert(false);
+        } else {
+            cpu->write32(addr & ~3, data); // Force-align address
+        }
     }
 
     // Handle post-index & writeback
@@ -249,9 +347,11 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
         if constexpr (isL) {
             assert(isImm);
 
-            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, [%s%s, %s0x%03X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%03X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
         } else {
-            assert(false);
+            assert(isImm);
+
+            std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%03X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
         }
     }
 }
@@ -280,6 +380,21 @@ bool testCond(CPU *cpu, Condition cond) {
     }
 }
 
+void decodeUnconditional(CPU *cpu, u32 instr) {
+    assert(cpu->cpuID == 9);
+
+    switch ((instr >> 24) & 0xF) {
+        case 0xA:
+        case 0xB:
+            aBLX<true>(cpu, instr);
+            break;
+        default:
+            std::printf("[ARM%d      ] Unhandled unconditional instruction 0x%08X @ 0x%08X\n", cpu->cpuID, instr, cpu->cpc);
+
+            exit(0);
+    }
+}
+
 void decodeARM(CPU *cpu) {
     cpu->cpc = cpu->r[CPUReg::PC];
 
@@ -293,7 +408,7 @@ void decodeARM(CPU *cpu) {
     // Check condition code
     const auto cond = Condition(instr >> 28);
 
-    assert(cond != Condition::NV);
+    if (cond == Condition::NV) return decodeUnconditional(cpu, instr);
 
     if (!testCond(cpu, cond)) return; // Instruction failed condition, don't execute
 
@@ -323,6 +438,9 @@ void init() {
             instrTableARM[i | 0x200] = &aDataProcessing<true, false, false>;
         }
     }
+
+    instrTableARM[0x120] = &aMSR<false, false>;
+    instrTableARM[0x160] = &aMSR<true , false>;
 
     for (int i = 0x400; i < 0x600; i++) {
         // Immediate SDT

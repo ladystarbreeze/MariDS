@@ -73,4 +73,21 @@ u32 read32ARM9(u32 addr) {
     return data;
 }
 
+void write32ARM9(u32 addr, u32 data) {
+    assert(!(addr & 3));
+
+    switch (addr) {
+        case static_cast<u32>(Memory9Base::MMIO) + 0x1A0:
+            std::printf("[Bus:ARM9  ] Write32 @ AUXSPICNT/AUXSPIDATA = 0x%08X\n", data);
+            break;
+        case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
+            std::printf("[Bus:ARM9  ] Write32 @ ROMCNT = 0x%08X\n", data);
+            break;
+        default:
+            std::printf("[Bus:ARM9  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
+
+            exit(0);
+    }
+}
+
 }
