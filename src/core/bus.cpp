@@ -7,6 +7,7 @@
 
 #include <cstdio>
 
+#include "ipc.hpp"
 #include "../common/file.hpp"
 
 namespace nds::bus {
@@ -16,6 +17,7 @@ namespace nds::bus {
 /* ARM7 base addresses */
 enum class Memory7Base : u32 {
     BIOS = 0x00000000,
+    IPC  = 0x04000180,
     WRAM = 0x03800000,
     MMIO = 0x04000000,
 };
@@ -193,7 +195,8 @@ void write8ARM7(u32 addr, u8 data) {
 void write16ARM7(u32 addr, u16 data) {
     assert(!(addr & 1));
 
-    if (false) {
+    if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
+        return ipc::write16ARM7(addr, data);
     } else {
         switch (addr) {
             default:

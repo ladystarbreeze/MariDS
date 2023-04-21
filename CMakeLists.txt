@@ -10,6 +10,7 @@ set(SOURCES
     src/main.cpp
     src/common/file.cpp
     src/core/bus.cpp
+    src/core/ipc.cpp
     src/core/MariDS.cpp
     src/core/cpu/cpu.cpp
     src/core/cpu/cpuint.cpp
@@ -20,6 +21,7 @@ set(HEADERS
     src/common/file.hpp
     src/common/types.hpp
     src/core/bus.hpp
+    src/core/ipc.hpp
     src/core/MariDS.hpp
     src/core/cpu/cpu.hpp
     src/core/cpu/cpuint.hpp
