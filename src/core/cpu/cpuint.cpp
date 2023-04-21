@@ -7,6 +7,7 @@
 
 #include <array>
 #include <bit>
+#include <string>
 
 namespace nds::cpu::interpreter {
 
@@ -74,6 +75,24 @@ enum ShiftType {
 
 std::array<void (*)(CPU *, u32), 4096> instrTableARM;
 std::array<void (*)(CPU *, u16), 1024> instrTableTHUMB;
+
+std::string getReglist(u32 reglist) {
+    assert(reglist);
+
+    std::string list;
+
+    while (reglist) {
+        const auto i = std::__countr_zero(reglist);
+
+        list += regNames[i];
+
+        if (std::__popcount(reglist) != 1) list += ", ";
+
+        reglist ^= 1 << i;
+    }
+
+    return list;
+}
 
 // Flag handlers
 
@@ -838,6 +857,32 @@ void tLoadFromPool(CPU *cpu, u16 instr) {
     if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] LDR %s, [0x%08X]; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], addr, regNames[rd], cpu->r[rd]);
 }
 
+/* Load/store halfword with immediate offset */
+template<bool isL>
+void tLoadHalfwordImmediateOffset(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 0) & 7;
+    const auto rn = (instr >> 3) & 7;
+
+    const auto offset = ((instr >> 6) & 0x1F) << 1;
+
+    const auto addr = cpu->r[rn] + offset;
+
+    if constexpr (isL) {
+        cpu->r[rd] = cpu->read16(addr);
+    } else {
+        cpu->write16(addr, cpu->r[rd]);
+    }
+
+    if (doDisasm) {
+        if constexpr (isL) {
+            std::printf("[ARM%d:T    ] [0x%08X] LDRH %s, [%s, 0x%02X]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], offset, regNames[rd], addr, cpu->r[rd]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] STRH %s, [%s, 0x%02X]; [0x%08X] = %s = 0x%04X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], offset, addr, regNames[rd], cpu->r[rd]);
+        }
+    }
+}
+
 /* Load/store with register offset */
 template<THUMBLoadOpcode opcode>
 void tLoadRegisterOffset(CPU *cpu, u16 instr) {
@@ -864,6 +909,62 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
             std::printf("[ARM%d:T    ] [0x%08X] STR %s, [%s, %s]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], regNames[rm], addr, regNames[rd], data);
         } else {
             assert(false);
+        }
+    }
+}
+
+/* PUSH/POP */
+template<bool isL, bool isR>
+void tPop(CPU *cpu, u16 instr) {
+    // Get reg list
+    u32 reglist = (u8)instr;
+
+    if constexpr (isR) reglist |= 1 << ((isL) ? CPUReg::PC : CPUReg::LR); // Add PC/LR to reglist
+
+    assert(reglist); // Can happen, shouldn't happen though
+
+    // Get base address from stack pointer, handle PUSH writeback
+    if constexpr (!isL) { // All LDM/STM variants start at the *lowest* memory address, calculate this for PUSH (aka STMDB)
+        cpu->r[CPUReg::SP] -= 4 * std::__popcount(reglist);
+    }
+
+    auto addr = cpu->r[CPUReg::SP];
+
+    for (auto rlist = reglist; rlist != 0; ) {
+        // Get next register
+        const auto i = std::__countr_zero(rlist);
+
+        if constexpr (isL) {
+            cpu->r[i] = cpu->read32(addr);
+
+            if (doDisasm) std::printf("R%u = [0x%08X] = 0x%08X\n", i, addr, cpu->r[i]);
+
+            if ((i == CPUReg::PC) && (cpu->cpuID == 9)) {
+                // Change processor state
+                cpu->cpsr.t = cpu->r[CPUReg::PC & 1];
+
+                cpu->r[CPUReg::PC] &= ~1;
+            }
+        } else {
+            if (doDisasm) std::printf("[0x%08X] = R%u = 0x%08X\n", addr, i, cpu->r[i]);
+
+            cpu->write32(addr, cpu->r[i]);
+        }
+
+        addr += 4;
+
+        rlist ^= 1 << i;
+    }
+
+    // Handle POP writeback
+    if constexpr (isL) cpu->r[CPUReg::SP] = addr;
+
+    if (doDisasm) {
+        const auto list = getReglist(reglist);
+        if constexpr (isL && isR) {
+            std::printf("[ARM%d:T    ] [0x%08X] %s {%s}; PC = 0x%08X\n", cpu->cpuID, cpu->cpc, (isL) ? "POP" : "PUSH", list.c_str(), cpu->r[CPUReg::PC]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] %s {%s}\n", cpu->cpuID, cpu->cpc, (isL) ? "POP" : "PUSH", list.c_str());
         }
     }
 }
@@ -1103,6 +1204,27 @@ void init() {
             case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR>; break;
         }
     }
+
+    for (int i = 0x200; i < 0x240; i++) {
+        instrTableTHUMB[i] = (i & (1 << 6)) ? &tLoadHalfwordImmediateOffset<true> : &tLoadHalfwordImmediateOffset<false>;
+    }
+
+    instrTableTHUMB[0x2D0] = &tPop<0, 0>;
+    instrTableTHUMB[0x2D1] = &tPop<0, 0>;
+    instrTableTHUMB[0x2D2] = &tPop<0, 0>;
+    instrTableTHUMB[0x2D3] = &tPop<0, 0>;
+    instrTableTHUMB[0x2D4] = &tPop<0, 1>;
+    instrTableTHUMB[0x2D5] = &tPop<0, 1>;
+    instrTableTHUMB[0x2D6] = &tPop<0, 1>;
+    instrTableTHUMB[0x2D7] = &tPop<0, 1>;
+    instrTableTHUMB[0x2F0] = &tPop<1, 0>;
+    instrTableTHUMB[0x2F1] = &tPop<1, 0>;
+    instrTableTHUMB[0x2F2] = &tPop<1, 0>;
+    instrTableTHUMB[0x2F3] = &tPop<1, 0>;
+    instrTableTHUMB[0x2F4] = &tPop<1, 1>;
+    instrTableTHUMB[0x2F5] = &tPop<1, 1>;
+    instrTableTHUMB[0x2F6] = &tPop<1, 1>;
+    instrTableTHUMB[0x2F7] = &tPop<1, 1>;
 
     for (int i = 0x340; i < 0x380; i++) {
         if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
