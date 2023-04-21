@@ -25,6 +25,11 @@ constexpr const char *dpNames[] = {
     "TST", "TEQ", "CMP", "CMN", "ORR", "MOV", "BIC", "MVN",
 };
 
+constexpr const char *thumbDPNames[] = {
+    "AND", "EOR", "LSL", "LSR", "ASR", "ADC", "SBC", "ROR",
+    "TST", "NEG", "CMP", "CMN", "ORR", "MUL", "BIC", "MVN",
+};
+
 constexpr const char *extraLoadNames[] = {
     "N/A", "STRH", "LDRD", "STRD", "N/A", "LDRH", "LDRSB", "LDRSH",
 };
@@ -49,7 +54,7 @@ enum Condition {
 };
 
 /* Data Processing opcodes */
-enum DPOpcode {
+enum class DPOpcode {
     AND, EOR, SUB, RSB, ADD, ADC, SBC, RSC,
     TST, TEQ, CMP, CMN, ORR, MOV, BIC, MVN,
 };
@@ -64,12 +69,18 @@ enum ExtraLoadOpcode {
     LDRSH = 7,
 };
 
+/* Data Processing opcodes */
+enum class THUMBDPOpcode {
+    AND, EOR, LSL, LSR, ASR, ADC, SBC, ROR,
+    TST, NEG, CMP, CMN, ORR, MUL, BIC, MVN,
+};
+
 /* THUMB loadstores */
 enum THUMBLoadOpcode {
     STR,
 };
 
-enum ShiftType {
+enum class ShiftType {
     LSL, LSR, ASR, ROR,
 };
 
@@ -479,7 +490,7 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             cpu->r[rd] = op2;
             break;
         default:
-            std::printf("[ARM%d      ] Unhandled Data Processing opcode %s\n", cpu->cpuID, dpNames[opcode]);
+            std::printf("[ARM%d      ] Unhandled Data Processing opcode %s\n", cpu->cpuID, dpNames[static_cast<int>(opcode)]);
 
             exit(0);
     }
@@ -490,23 +501,23 @@ void aDataProcessing(CPU *cpu, u32 instr) {
         if constexpr (isImm) {
             switch (opcode) {
                 case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rn], op2, regNames[rn], cpu->get(rn));
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], op2, regNames[rn], cpu->get(rn));
                     break;
                 case DPOpcode::MOV: case DPOpcode::MVN:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], op2, regNames[rd], cpu->r[rd]);
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], op2, regNames[rd], cpu->r[rd]);
                     break;
                 default:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], regNames[rn], op2, regNames[rd], cpu->r[rd]);
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rn], op2, regNames[rd], cpu->r[rd]);
                     break;
             }
         } else {
             if constexpr (isImmShift) {
                 switch (opcode) {
                     case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
-                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rn], regNames[rm], shiftNames[stype], amt, regNames[rn], cpu->get(rn));
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rn], cpu->get(rn));
                         break;
                     case DPOpcode::MOV: case DPOpcode::MVN:
-                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], cond, regNames[rd], regNames[rm], shiftNames[stype], amt, regNames[rd], cpu->r[rd]);
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
                         break;
                     default:
                         assert(false);
@@ -765,6 +776,42 @@ void tUnhandledInstruction(CPU *cpu, u16 instr) {
     exit(0);
 }
 
+/* THUMB Branch and Link */
+template<int H>
+void tBranchLink(CPU *cpu, u16 instr) {
+    static_assert((H >= 1) && (H < 4));
+
+    // Get offset
+    auto offset = (u32)(instr & 0x7FF);
+
+    if constexpr (H == 2) { // Sign-extend offset, left shift by 12
+        offset = (i32)(offset << 21) >> 9;
+
+        cpu->r[CPUReg::LR] = cpu->get(CPUReg::PC) + offset;
+    } else { // * 2
+        offset <<= 1;
+
+        const auto pc = cpu->r[CPUReg::PC];
+
+        cpu->r[CPUReg::PC] = cpu->r[CPUReg::LR] + offset;
+        cpu->r[CPUReg::LR] = pc | 1;
+
+        if constexpr (H == 1) { // BLX
+            cpu->r[CPUReg::PC] &= ~3;
+
+            cpu->cpsr.t = false;
+        }
+    }
+
+    if (doDisasm) {
+        if constexpr (H == 2) {
+            std::printf("[ARM%d:T    ] [0x%08X] BL; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, cpu->r[CPUReg::LR]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] BL%s 0x%08X; LR = 0x%08X\n", cpu->cpuID, cpu->cpc, (H == 1) ? "X" : "", cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
+        }
+    }
+}
+
 /* THUMB Branch and Exchange */
 template<bool isLink>
 void tBranchExchange(CPU *cpu, u16 instr) {
@@ -773,11 +820,15 @@ void tBranchExchange(CPU *cpu, u16 instr) {
 
     assert(rm != CPUReg::PC); // Stoobit
 
-    if constexpr (isLink) cpu->r[CPUReg::LR] = cpu->r[CPUReg::PC];
+    if constexpr (isLink) {
+        assert(rm != CPUReg::LR);
 
-    cpu->r[CPUReg::PC] = cpu->r[rm];
+        cpu->r[CPUReg::LR] = cpu->r[CPUReg::PC];
+    }
 
-    cpu->cpsr.t = false;
+    cpu->r[CPUReg::PC] = cpu->r[rm] & ~1;
+
+    cpu->cpsr.t = cpu->r[rm] & 1;
 
     if (doDisasm) {
         if constexpr (isLink) {
@@ -801,6 +852,42 @@ void tConditionalBranch(CPU *cpu, u16 instr) {
     if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] B%s 0x%08X\n", cpu->cpuID, cpu->cpc, condNames[cond], target);
 }
 
+/* THUMB Data Processing (register) */
+template<THUMBDPOpcode opcode>
+void tDataProcessing(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 0) & 7;
+    const auto rm = (instr >> 3) & 7;
+
+    cpu->cout = cpu->cpsr.t; // Required for bit flags
+
+    switch (opcode) {
+        case THUMBDPOpcode::CMP:
+            setSubFlags(cpu, cpu->r[rd], cpu->r[rm], cpu->r[rd] - cpu->r[rm]);
+            break;
+        case THUMBDPOpcode::MVN:
+            cpu->r[rd] = ~cpu->r[rm];
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        default:
+            std::printf("[ARM%d:T    ] Unhandled Data Processing opcode %s\n", cpu->cpuID, thumbDPNames[static_cast<int>(opcode)]);
+
+            exit(0);
+    }
+
+    if (doDisasm) {
+        switch (opcode) {
+            case THUMBDPOpcode::TST: case THUMBDPOpcode::CMP: case THUMBDPOpcode::CMN:
+                std::printf("[ARM%d:T    ] [0x%08X] %s %s, %s; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbDPNames[static_cast<int>(opcode)], regNames[rd], regNames[rm], regNames[rd], cpu->r[rd], regNames[rm], cpu->r[rm]);
+                break;
+            default:
+                std::printf("[ARM%d:T    ] [0x%08X] %sS %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbDPNames[static_cast<int>(opcode)], regNames[rd], regNames[rm], regNames[rd], cpu->r[rd]);
+                break;
+        }
+    }
+}
+
 /* THUMB Data Processing (ADD/SUB/MOV/CMP) */
 template<DPOpcode opcode>
 void tDataProcessingLarge(CPU *cpu, u16 instr) {
@@ -810,6 +897,8 @@ void tDataProcessingLarge(CPU *cpu, u16 instr) {
     const auto rd = (instr >> 8) & 7;
 
     const auto imm = instr & 0xFF;
+
+    cpu->cout = cpu->cpsr.t; // Required for bit flags
 
     switch (opcode) {
         case DPOpcode::ADD:
@@ -840,7 +929,7 @@ void tDataProcessingLarge(CPU *cpu, u16 instr) {
             break;
     }
 
-    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %s%s %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[opcode], (opcode != DPOpcode::CMP) ? "S" : "", regNames[rd], imm, regNames[rd], cpu->r[rd]);
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %s%s %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], (opcode != DPOpcode::CMP) ? "S" : "", regNames[rd], imm, regNames[rd], cpu->r[rd]);
 }
 
 /* Load from literal pool */
@@ -848,7 +937,7 @@ void tLoadFromPool(CPU *cpu, u16 instr) {
     // Get operands
     const auto rd = (instr >> 8) & 7;
 
-    const auto offset = (i32)(i8)instr << 2;
+    const auto offset = (instr & 0xFF) << 2;
 
     const auto addr = (cpu->get(CPUReg::PC) & ~3) + offset;
 
@@ -879,6 +968,45 @@ void tLoadHalfwordImmediateOffset(CPU *cpu, u16 instr) {
             std::printf("[ARM%d:T    ] [0x%08X] LDRH %s, [%s, 0x%02X]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], offset, regNames[rd], addr, cpu->r[rd]);
         } else {
             std::printf("[ARM%d:T    ] [0x%08X] STRH %s, [%s, 0x%02X]; [0x%08X] = %s = 0x%04X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], offset, addr, regNames[rd], cpu->r[rd]);
+        }
+    }
+}
+
+/* Load/store with immediate offset */
+template<bool isB, bool isL>
+void tLoadImmediateOffset(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 0) & 7;
+    const auto rn = (instr >> 3) & 7;
+
+    auto offset = (instr >> 6) & 0x1F;
+
+    if constexpr (!isB) offset <<= 2;
+
+    const auto addr = cpu->r[rn] + offset;
+    const auto data = cpu->r[rd];
+
+    if constexpr (isL) {
+        if constexpr (isB) {
+            cpu->r[rd] = cpu->read8(addr);
+        } else {
+            assert(!(addr & 3));
+
+            cpu->r[rd] = cpu->read32(addr);
+        }
+    } else {
+        if constexpr (isB) {
+            cpu->write8(addr, data);
+        } else {
+            cpu->write32(addr & ~3, data);
+        }
+    }
+
+    if (doDisasm) {
+        if constexpr (isL) {
+            std::printf("[ARM%d:T    ] [0x%08X] LDR%s %s, [%s, %u]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, (isB) ? "B" : "", regNames[rd], regNames[rn], offset, regNames[rd], addr, cpu->r[rd]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] STR%s %s, [%s, %u]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isB) ? "B" : "", regNames[rd], regNames[rn], offset, addr, regNames[rd], data);
         }
     }
 }
@@ -967,6 +1095,22 @@ void tPop(CPU *cpu, u16 instr) {
             std::printf("[ARM%d:T    ] [0x%08X] %s {%s}\n", cpu->cpuID, cpu->cpc, (isL) ? "POP" : "PUSH", list.c_str());
         }
     }
+}
+
+/* Shift */
+template<ShiftType stype>
+void tShift(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 0) & 7;
+    const auto rm = (instr >> 3) & 7;
+
+    const auto amt = (instr >> 6) & 0x1F;
+
+    cpu->r[rd] = shift<stype, true>(cpu, cpu->r[rm], amt);
+
+    setBitFlags(cpu, cpu->r[rd]);
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %sS %s, %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, shiftNames[static_cast<int>(stype)], regNames[rd], regNames[rm], amt, regNames[rd], cpu->r[rd]);
 }
 
 void decodeUnconditional(CPU *cpu, u32 instr) {
@@ -1183,12 +1327,37 @@ void init() {
     }
 
     // THUMB
+    for (int i = 0x000; i < 0x080; i++) {
+        switch ((i >> 5) & 3) {
+            case 0: instrTableTHUMB[i] = &tShift<ShiftType::LSL>; break;
+            case 1: instrTableTHUMB[i] = &tShift<ShiftType::LSR>; break;
+            case 2: instrTableTHUMB[i] = &tShift<ShiftType::ASR>; break;
+        }
+    }
+
     for (int i = 0x080; i < 0x0A0; i++) {
         instrTableTHUMB[i | (0 << 5)] = &tDataProcessingLarge<DPOpcode::MOV>;
         instrTableTHUMB[i | (1 << 5)] = &tDataProcessingLarge<DPOpcode::CMP>;
         instrTableTHUMB[i | (2 << 5)] = &tDataProcessingLarge<DPOpcode::ADD>;
         instrTableTHUMB[i | (3 << 5)] = &tDataProcessingLarge<DPOpcode::SUB>;
     }
+
+    instrTableTHUMB[0x100] = &tDataProcessing<THUMBDPOpcode::AND>;
+    instrTableTHUMB[0x101] = &tDataProcessing<THUMBDPOpcode::EOR>;
+    instrTableTHUMB[0x102] = &tDataProcessing<THUMBDPOpcode::LSL>;
+    instrTableTHUMB[0x103] = &tDataProcessing<THUMBDPOpcode::LSR>;
+    instrTableTHUMB[0x104] = &tDataProcessing<THUMBDPOpcode::ASR>;
+    instrTableTHUMB[0x105] = &tDataProcessing<THUMBDPOpcode::ADC>;
+    instrTableTHUMB[0x106] = &tDataProcessing<THUMBDPOpcode::SBC>;
+    instrTableTHUMB[0x107] = &tDataProcessing<THUMBDPOpcode::ROR>;
+    instrTableTHUMB[0x108] = &tDataProcessing<THUMBDPOpcode::TST>;
+    instrTableTHUMB[0x109] = &tDataProcessing<THUMBDPOpcode::NEG>;
+    instrTableTHUMB[0x10A] = &tDataProcessing<THUMBDPOpcode::CMP>;
+    instrTableTHUMB[0x10B] = &tDataProcessing<THUMBDPOpcode::CMN>;
+    instrTableTHUMB[0x10C] = &tDataProcessing<THUMBDPOpcode::ORR>;
+    instrTableTHUMB[0x10D] = &tDataProcessing<THUMBDPOpcode::MUL>;
+    instrTableTHUMB[0x10E] = &tDataProcessing<THUMBDPOpcode::BIC>;
+    instrTableTHUMB[0x10F] = &tDataProcessing<THUMBDPOpcode::MVN>;
 
     instrTableTHUMB[0x11C] = &tBranchExchange<false>;
     instrTableTHUMB[0x11D] = &tBranchExchange<false>;
@@ -1205,8 +1374,15 @@ void init() {
         }
     }
 
+    for (int i = 0x180; i < 0x1A0; i++) {
+        instrTableTHUMB[i | (0 << 5)] = &tLoadImmediateOffset<0, 0>;
+        instrTableTHUMB[i | (1 << 5)] = &tLoadImmediateOffset<0, 1>;
+        instrTableTHUMB[i | (2 << 5)] = &tLoadImmediateOffset<1, 0>;
+        instrTableTHUMB[i | (3 << 5)] = &tLoadImmediateOffset<1, 1>;
+    }
+
     for (int i = 0x200; i < 0x240; i++) {
-        instrTableTHUMB[i] = (i & (1 << 6)) ? &tLoadHalfwordImmediateOffset<true> : &tLoadHalfwordImmediateOffset<false>;
+        instrTableTHUMB[i] = (i & (1 << 5)) ? &tLoadHalfwordImmediateOffset<true> : &tLoadHalfwordImmediateOffset<false>;
     }
 
     instrTableTHUMB[0x2D0] = &tPop<0, 0>;
@@ -1229,6 +1405,14 @@ void init() {
     for (int i = 0x340; i < 0x380; i++) {
         if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
             instrTableTHUMB[i] = &tConditionalBranch;
+        }
+    }
+
+    for (int i = 0x380; i < 0x400; i++) {
+        switch ((i >> 5) & 3) {
+            case 1: instrTableTHUMB[i] = &tBranchLink<1>; break;
+            case 2: instrTableTHUMB[i] = &tBranchLink<2>; break;
+            case 3: instrTableTHUMB[i] = &tBranchLink<3>; break;
         }
     }
 }
