@@ -170,7 +170,9 @@ u32 read32ARM9(u32 addr) {
     
     u32 data;
 
-    if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::DTCM), static_cast<u32>(Memory9Limit::DTCM))) {
+        std::memcpy(&data, &dtcm[addr & (static_cast<u32>(Memory9Limit::DTCM) - 1)], sizeof(u32));
+    } else if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
         std::memcpy(&data, &bios9[addr & 0xFFC], sizeof(u32));
     } else {
         std::printf("[Bus:ARM9  ] Unhandled read32 @ 0x%08X\n", addr);
