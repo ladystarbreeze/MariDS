@@ -102,7 +102,9 @@ void init(const char *bios7Path, const char *bios9Path) {
 }
 
 u8 read8ARM7(u32 addr) {
-    if (inRange(addr, static_cast<u32>(Memory7Base::SWRAM), 16 * 16 * static_cast<u32>(Memory7Limit::SWRAM))) {
+    if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
+        return bios7[addr & (static_cast<u32>(Memory7Limit::BIOS) - 1)];
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::SWRAM), 16 * 16 * static_cast<u32>(Memory7Limit::SWRAM))) {
         return swram7[addr & swramLimit7];
     } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
         return wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)];
@@ -172,14 +174,14 @@ u32 read32ARM7(u32 addr) {
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
-                std::printf("[Bus:ARM9  ] Read32 @ ROMCTRL\n");
+                std::printf("[Bus:ARM7  ] Read32 @ ROMCTRL\n");
                 return 1 << 23;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
                 std::printf("[SPI       ] Read32 @ SPICNT\n"); // And SPIDATA??
                 //return (u32)spi::readSPICNT() | ((u32)spi::readSPIDATA() << 16);
                 return spi::readSPICNT();
             case 0x04100010:
-                std::printf("[Bus:ARM9  ] Read32 @ ROMDATA\n");
+                std::printf("[Bus:ARM7  ] Read32 @ ROMDATA\n");
                 return -1;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read32 @ 0x%08X\n", addr);
@@ -299,6 +301,12 @@ void write16ARM7(u32 addr, u16 data) {
         return ipc::write16ARM7(addr, data);
     } else {
         switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1B8:
+                std::printf("[Bus:ARM7  ] Write16 @ ROMSEED0_HI = 0x%04X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1BA:
+                std::printf("[Bus:ARM7  ] Write16 @ ROMSEED1_HI = 0x%04X\n", data);
+                break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
                 std::printf("[SPI       ] Write16 @ SPICNT = 0x%04X\n", data);
                 return spi::writeSPICNT(data);
@@ -332,6 +340,12 @@ void write32ARM7(u32 addr, u32 data) {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
                 std::printf("[Bus:ARM7  ] Write32 @ ROMCNT = 0x%08X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1B0:
+                std::printf("[Bus:ARM7  ] Write32 @ ROMSEED0_LO = 0x%08X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1B4:
+                std::printf("[Bus:ARM7  ] Write32 @ ROMSEED1_LO = 0x%08X\n", data);
                 break;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
