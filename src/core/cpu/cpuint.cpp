@@ -465,6 +465,15 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 
     switch (opcode) {
+        case DPOpcode::SUB:
+            {
+                const auto res = op1 - op2;
+
+                if (isS) setSubFlags(cpu, op1, op2, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
         case DPOpcode::ADD:
             {
                 const auto res = op1 + op2;
@@ -473,6 +482,11 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
                 cpu->r[rd] = res;
             }
+            break;
+        case DPOpcode::TST:
+            assert(isS); // Safeguard
+
+            setBitFlags(cpu, op1 & op2);
             break;
         case DPOpcode::TEQ:
             assert(isS); // Safeguard
@@ -488,6 +502,15 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             if (isS) setBitFlags(cpu, op2);
 
             cpu->r[rd] = op2;
+            break;
+        case DPOpcode::BIC:
+            {
+                const auto res = op1 & ~op2;
+
+                if (isS) setBitFlags(cpu, res);
+
+                cpu->r[rd] = res;
+            }
             break;
         default:
             std::printf("[ARM%d      ] Unhandled Data Processing opcode %s\n", cpu->cpuID, dpNames[static_cast<int>(opcode)]);
@@ -876,6 +899,60 @@ void tUnhandledInstruction(CPU *cpu, u16 instr) {
     exit(0);
 }
 
+/* THUMB Add/Sub short/register */
+template<bool opc, bool isImm>
+void tAddShort(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 0) & 7;
+    const auto rm = (instr >> 6) & 7;
+    const auto rn = (instr >> 3) & 7;
+
+    const auto op2 = (isImm) ? rm : cpu->r[rm];
+
+    const auto res = (opc) ? cpu->r[rn] - op2 : cpu->r[rn] + op2;
+
+    if constexpr (opc) {
+        setSubFlags(cpu, cpu->r[rn], op2, res);
+    } else {
+        setAddFlags(cpu, cpu->r[rn], op2, res);
+    }
+
+    cpu->r[rd] = res;
+
+    if (doDisasm) {
+        if constexpr (isImm) {
+            std::printf("[ARM%d:T    ] [0x%08X] %sS %s, %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (opc) ? "SUB" : "ADD", regNames[rd], regNames[rn], rm, regNames[rd], cpu->r[rd]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] %sS %s, %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (opc) ? "SUB" : "ADD", regNames[rd], regNames[rn], regNames[rm], regNames[rd], cpu->r[rd]);
+        }
+    }
+}
+
+/* THUMB Adjust SP */
+template<bool opc>
+void tAdjustSP(CPU *cpu, u16 instr) {
+    // Get offset
+    const auto offset = (instr & 0x7F) << 2;
+
+    if constexpr (opc) {
+        cpu->r[CPUReg::SP] -= offset;
+    } else {
+        cpu->r[CPUReg::SP] += offset;
+    }
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %s SP, 0x%03X; SP = 0x%08X\n", cpu->cpuID, cpu->cpc, (opc) ? "SUB" : "ADD", offset, cpu->r[CPUReg::SP]);
+}
+
+/* THUMB unconditional branch */
+void tBranch(CPU *cpu, u16 instr) {
+    // Get offset
+    const auto offset = (i32)((u32)(instr & 0x7FF) << 21) >> 20;
+
+    cpu->r[CPUReg::PC] = cpu->get(CPUReg::PC) + offset;
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] B 0x%08X\n", cpu->cpuID, cpu->cpc, cpu->r[CPUReg::PC]);
+}
+
 /* THUMB Branch and Link */
 template<int H>
 void tBranchLink(CPU *cpu, u16 instr) {
@@ -964,6 +1041,11 @@ void tDataProcessing(CPU *cpu, u16 instr) {
     switch (opcode) {
         case THUMBDPOpcode::CMP:
             setSubFlags(cpu, cpu->r[rd], cpu->r[rm], cpu->r[rd] - cpu->r[rm]);
+            break;
+        case THUMBDPOpcode::ORR:
+            cpu->r[rd] |= cpu->r[rm];
+
+            setBitFlags(cpu, cpu->r[rd]);
             break;
         case THUMBDPOpcode::MVN:
             cpu->r[rd] = ~cpu->r[rm];
@@ -1334,17 +1416,17 @@ void init() {
     for (int i = 0x000; i < 0x200; i++) {
         if (!(i & 1) && ((i & 0x191) != 0x100)) { // Don't include misc instructions
             // Immediate shift
-            instrTableARM[i] = &aDataProcessing<false, true, false>;
+            instrTableARM[i] = &aDataProcessing<0, 1, 0>;
         }
 
         if (((i & 9) == 1) && ((i & 0x199) != 0x101)) { // Don't include multiplies
             // Register shift
-            instrTableARM[i] = &aDataProcessing<false, false, true>;
+            instrTableARM[i] = &aDataProcessing<0, 0, 1>;
         }
 
         if (((i & 0x1B0) != 0x100) && ((i & 0x1B0) != 0x120)) { // Don't include UDF and MSR
             // Immediate DP
-            instrTableARM[i | 0x200] = &aDataProcessing<true, false, false>;
+            instrTableARM[i | 0x200] = &aDataProcessing<1, 0, 0>;
         }
     }
 
@@ -1386,11 +1468,11 @@ void init() {
     //instrTableARM[0x01D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 0, 0>;
     //instrTableARM[0x01F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 0, 0>;
 
-    instrTableARM[0x120] = &aMSR<false, false>;
-    instrTableARM[0x160] = &aMSR<true , false>;
+    instrTableARM[0x120] = &aMSR<0, 0>;
+    instrTableARM[0x160] = &aMSR<1, 0>;
     
     instrTableARM[0x121] = &aBX;
-    instrTableARM[0x123] = &aBLX<false>;
+    instrTableARM[0x123] = &aBLX<0>;
 
     for (int i = 0x400; i < 0x600; i++) {
         // Immediate SDT
@@ -1504,16 +1586,16 @@ void init() {
     }
 
     for (int i = 0xA00; i < 0xB00; i++) {
-        instrTableARM[i | 0x000] = &aBranch<false>;
-        instrTableARM[i | 0x100] = &aBranch<true>;
+        instrTableARM[i | 0x000] = &aBranch<0>;
+        instrTableARM[i | 0x100] = &aBranch<1>;
     }
 
     for (int i = 0xE00; i < 0xF00; i++) {
         if (i & 1) {
             if (i & (1 << 4)) {
-                instrTableARM[i] = &aCoprocessorRegisterTransfer<true>;
+                instrTableARM[i] = &aCoprocessorRegisterTransfer<1>;
             } else {
-                instrTableARM[i] = &aCoprocessorRegisterTransfer<false>;
+                instrTableARM[i] = &aCoprocessorRegisterTransfer<0>;
             }
         }
     }
@@ -1524,6 +1606,14 @@ void init() {
             case 0: instrTableTHUMB[i] = &tShift<ShiftType::LSL>; break;
             case 1: instrTableTHUMB[i] = &tShift<ShiftType::LSR>; break;
             case 2: instrTableTHUMB[i] = &tShift<ShiftType::ASR>; break;
+            case 3:
+                switch ((i >> 3) & 3) {
+                    case 0: instrTableTHUMB[i] = &tAddShort<0, 0>; break;
+                    case 1: instrTableTHUMB[i] = &tAddShort<1, 0>; break;
+                    case 2: instrTableTHUMB[i] = &tAddShort<0, 1>; break;
+                    case 3: instrTableTHUMB[i] = &tAddShort<1, 1>; break;
+                }
+                break;
         }
     }
 
@@ -1557,10 +1647,10 @@ void init() {
         instrTableTHUMB[i | (2 << 2)] = &tDataProcessingSpecial<DPOpcode::MOV>;
     }
 
-    instrTableTHUMB[0x11C] = &tBranchExchange<false>;
-    instrTableTHUMB[0x11D] = &tBranchExchange<false>;
-    instrTableTHUMB[0x11E] = &tBranchExchange<true>;
-    instrTableTHUMB[0x11F] = &tBranchExchange<true>;
+    instrTableTHUMB[0x11C] = &tBranchExchange<0>;
+    instrTableTHUMB[0x11D] = &tBranchExchange<0>;
+    instrTableTHUMB[0x11E] = &tBranchExchange<1>;
+    instrTableTHUMB[0x11F] = &tBranchExchange<1>;
 
     for (int i = 0x120; i < 0x140; i++) {
         instrTableTHUMB[i] = &tLoadFromPool;
@@ -1580,13 +1670,18 @@ void init() {
     }
 
     for (int i = 0x200; i < 0x240; i++) {
-        instrTableTHUMB[i] = (i & (1 << 5)) ? &tLoadHalfwordImmediateOffset<true> : &tLoadHalfwordImmediateOffset<false>;
+        instrTableTHUMB[i] = (i & (1 << 5)) ? &tLoadHalfwordImmediateOffset<1> : &tLoadHalfwordImmediateOffset<0>;
     }
 
     for (int i = 0x240; i < 0x260; i++) {
-        instrTableTHUMB[i | (0 << 5)] = &tLoadFromStack<false>;
-        instrTableTHUMB[i | (1 << 5)] = &tLoadFromStack<true>;
+        instrTableTHUMB[i | (0 << 5)] = &tLoadFromStack<0>;
+        instrTableTHUMB[i | (1 << 5)] = &tLoadFromStack<1>;
     }
+
+    instrTableTHUMB[0x2C0] = &tAdjustSP<0>;
+    instrTableTHUMB[0x2C1] = &tAdjustSP<0>;
+    instrTableTHUMB[0x2C2] = &tAdjustSP<1>;
+    instrTableTHUMB[0x2C3] = &tAdjustSP<1>;
 
     instrTableTHUMB[0x2D0] = &tPop<0, 0>;
     instrTableTHUMB[0x2D1] = &tPop<0, 0>;
@@ -1613,6 +1708,7 @@ void init() {
 
     for (int i = 0x380; i < 0x400; i++) {
         switch ((i >> 5) & 3) {
+            case 0: instrTableTHUMB[i] = &tBranch; break;
             case 1: instrTableTHUMB[i] = &tBranchLink<1>; break;
             case 2: instrTableTHUMB[i] = &tBranchLink<2>; break;
             case 3: instrTableTHUMB[i] = &tBranchLink<3>; break;
