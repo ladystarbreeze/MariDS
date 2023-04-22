@@ -51,7 +51,14 @@ u16 readSPICNT() {
 u8 readSPIDATA() {
     if (!spicnt.spien || !spicnt.chipselect) return 0;
 
-    assert(false);
+    switch (spicnt.dev) {
+        case SPIDev::Firmware:
+            return firmware::read();
+        default:
+            std::printf("[SPI       ] Unhandled SPI device %s\n", devNames[spicnt.dev]);
+
+            exit(0);
+    }
 }
 
 void writeSPICNT(u16 data) {
@@ -82,7 +89,11 @@ void writeSPIDATA(u8 data) {
                 exit(0);
         }
 
-        if (!spicnt.hold) spicnt.chipselect = false; // Release chip
+        if (!spicnt.hold) {
+            firmware::release();
+            
+            spicnt.chipselect = false; // Release chip
+        }
 
         assert(!spicnt.irqen);
     }
