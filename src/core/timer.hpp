@@ -9,6 +9,10 @@
 
 namespace nds::timer {
 
+void init();
+void run(i64 runCycles);
+
+void write16ARM7(u32 addr, u16 data);
 void write32ARM7(u32 addr, u32 data);
 
 }

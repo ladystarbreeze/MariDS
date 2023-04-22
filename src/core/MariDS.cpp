@@ -9,6 +9,7 @@
 
 #include "bus.hpp"
 #include "firmware.hpp"
+#include "timer.hpp"
 #include "cpu/cpu.hpp"
 #include "cpu/cpuint.hpp"
 
@@ -23,6 +24,8 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath) {
 
     bus::init(bios7Path, bios9Path);
     firmware::init(firmPath);
+    timer::init();
+
     cpu::interpreter::init();
 }
 
@@ -30,6 +33,8 @@ void run() {
     while (true) {
         cpu::interpreter::run(&arm9, 16);
         cpu::interpreter::run(&arm7, 8);
+
+        timer::run(8);
     }
 }
 
