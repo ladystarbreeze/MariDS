@@ -10,6 +10,7 @@ set(SOURCES
     src/main.cpp
     src/common/file.cpp
     src/core/bus.cpp
+    src/core/firmware.cpp
     src/core/ipc.cpp
     src/core/MariDS.cpp
     src/core/spi.cpp
@@ -23,6 +24,7 @@ set(HEADERS
     src/common/file.hpp
     src/common/types.hpp
     src/core/bus.hpp
+    src/core/firmware.hpp
     src/core/ipc.hpp
     src/core/MariDS.hpp
     src/core/spi.hpp

@@ -8,23 +8,31 @@
 #include <cassert>
 #include <cstdio>
 
+#include "firmware.hpp"
+
 namespace nds::spi {
 
+constexpr const char *devNames[] = {
+    "Power Management", "Firmware", "TSC", "Reserved",
+};
+
+enum SPIDev {
+    PowerManagement, Firmware, TSC, Reserved,
+};
+
 struct SPICNT {
-    u8   baud;
-    bool busy;
-    u8   dev;
-    bool size;
-    bool hold;
-    bool irqen;
-    bool spien;
+    u8     baud;
+    bool   busy;
+    SPIDev dev;
+    bool   size;
+    bool   hold;
+    bool   irqen;
+    bool   spien;
 
     bool chipselect;
 };
 
 SPICNT spicnt;
-
-u16 spidata;
 
 u16 readSPICNT() {
     u16 data;
@@ -40,10 +48,44 @@ u16 readSPICNT() {
     return data;
 }
 
-u16 readSPIDATA() {
-    if (!spicnt.spien) return 0;
+u8 readSPIDATA() {
+    if (!spicnt.spien || !spicnt.chipselect) return 0;
 
-    return spidata;
+    assert(false);
+}
+
+void writeSPICNT(u16 data) {
+    spicnt.baud  = data & 3;
+    spicnt.size  = data & (1 << 10);
+    spicnt.hold  = data & (1 << 11);
+    spicnt.irqen = data & (1 << 14);
+    spicnt.spien = data & (1 << 15);
+
+    if (!spicnt.chipselect) { // Select new device
+        spicnt.dev = (SPIDev)((data >> 8) & 3);
+
+        spicnt.chipselect = true;
+    }
+
+    assert(!spicnt.size); // Don't think anything uses this
+}
+
+void writeSPIDATA(u8 data) {
+    if (spicnt.spien && spicnt.chipselect) {
+        switch (spicnt.dev) {
+            case SPIDev::Firmware:
+                firmware::write(data);
+                break;
+            default:
+                std::printf("[SPI       ] Unhandled SPI device %s\n", devNames[spicnt.dev]);
+
+                exit(0);
+        }
+
+        if (!spicnt.hold) spicnt.chipselect = false; // Release chip
+
+        assert(!spicnt.irqen);
+    }
 }
 
 }

@@ -7,12 +7,12 @@
 
 #include "../common/types.hpp"
 
-namespace nds::spi {
+namespace nds::firmware {
 
-u16 readSPICNT();
-u8  readSPIDATA();
+void init(const char *firmPath);
 
-void writeSPICNT (u16 data);
-void writeSPIDATA(u8  data);
+u8 read();
+
+void write(u8 data);
 
 }

@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "bus.hpp"
+#include "firmware.hpp"
 #include "cpu/cpu.hpp"
 #include "cpu/cpuint.hpp"
 
@@ -17,10 +18,11 @@ cpu::CP15 cp15;
 
 cpu::CPU arm7(7, NULL), arm9(9, &cp15);
 
-void init(const char *bios7Path, const char *bios9Path) {
-    std::printf("[MariDS    ] BIOS7: \"%s\"\n[MariDS    ] BIOS9: \"%s\"\n", bios7Path, bios9Path);
+void init(const char *bios7Path, const char *bios9Path, const char *firmPath) {
+    std::printf("[MariDS    ] BIOS7: \"%s\"\n[MariDS    ] BIOS9: \"%s\"\n[MariDS    ] Firmware: \"%s\"\n", bios7Path, bios9Path, firmPath);
 
     bus::init(bios7Path, bios9Path);
+    firmware::init(firmPath);
     cpu::interpreter::init();
 }
 

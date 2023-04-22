@@ -7,7 +7,7 @@
 
 namespace nds {
 
-void init(const char *bios7Path, const char *bios9Path);
+void init(const char *bios7Path, const char *bios9Path, const char *firmPath);
 void run();
 
 }
