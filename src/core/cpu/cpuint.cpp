@@ -465,6 +465,15 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     }
 
     switch (opcode) {
+        case DPOpcode::AND:
+            {
+                const auto res = op1 & op2;
+
+                if (isS) setBitFlags(cpu, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
         case DPOpcode::SUB:
             {
                 const auto res = op1 - op2;
@@ -670,12 +679,14 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
             // ARM7 stores the old base only if Rn is the first register in reglist.
             // If not, it stores the NEW base. Handle this here
             if ((cpu->cpuID == 7) && ((int)rn == std::__countr_zero(reglist))) {
-                cpu->r[rn] = addr;
+                if constexpr (isU) {
+                    cpu->r[rn] = addr + 4 * std::__popcount(reglist);
+                } else {
+                    cpu->r[rn] = addr;
+                }
             }
 
             // ARM9 always stores the OLD base, so don't do anything here
-        } else {
-            cpu->r[rn] = addr;
         }
     } 
 
@@ -1059,11 +1070,26 @@ void tDataProcessing(CPU *cpu, u16 instr) {
 
             setBitFlags(cpu, cpu->r[rd]);
             break;
+        case THUMBDPOpcode::NEG:
+            cpu->r[rd] = 0 - cpu->r[rm];
+
+            setSubFlags(cpu, 0, cpu->r[rm], cpu->r[rd]);
+            break;
         case THUMBDPOpcode::CMP:
             setSubFlags(cpu, cpu->r[rd], cpu->r[rm], cpu->r[rd] - cpu->r[rm]);
             break;
         case THUMBDPOpcode::ORR:
             cpu->r[rd] |= cpu->r[rm];
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::MUL:
+            cpu->r[rd] *= cpu->r[rm];
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::BIC:
+            cpu->r[rd] &= ~cpu->r[rm];
 
             setBitFlags(cpu, cpu->r[rd]);
             break;
@@ -1141,23 +1167,26 @@ void tDataProcessingSpecial(CPU *cpu, u16 instr) {
     const auto rd = (instr & 7) | ((instr >> 4) & 8);
     const auto rm = (instr >> 3) & 0xF;
 
-    assert((rd != CPUReg::PC) && (rm != CPUReg::PC));
+    const auto op1 = cpu->get(rd);
+    const auto op2 = cpu->get(rm);
 
     switch (opcode) {
         case DPOpcode::ADD:
-            cpu->r[rd] += cpu->r[rm];
+            cpu->r[rd] += op2;
             break;
         case DPOpcode::CMP:
-            setSubFlags(cpu, cpu->r[rd], cpu->r[rm], cpu->r[rd] - cpu->r[rm]);
+            setSubFlags(cpu, op1, op2, op1 - op2);
             break;
         case DPOpcode::MOV:
-            cpu->r[rd] = cpu->r[rm];
+            cpu->r[rd] = op2;
             break;
     }
 
+    if (rd == CPUReg::PC) cpu->r[CPUReg::PC] &= ~1;
+
     if (doDisasm) {
         if constexpr (opcode == DPOpcode::CMP) {
-            std::printf("[ARM%d:T    ] [0x%08X] CMP %s, %s; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rm], regNames[rd], cpu->r[rd], regNames[rm], cpu->r[rm]);
+            std::printf("[ARM%d:T    ] [0x%08X] CMP %s, %s; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rm], regNames[rd], op1, regNames[rm], op2);
         } else {
             std::printf("[ARM%d:T    ] [0x%08X] %s %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], regNames[rd], regNames[rm], regNames[rd], cpu->r[rd]);
         }
@@ -1284,6 +1313,72 @@ void tLoadImmediateOffset(CPU *cpu, u16 instr) {
         } else {
             std::printf("[ARM%d:T    ] [0x%08X] STR%s %s, [%s, %u]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isB) ? "B" : "", regNames[rd], regNames[rn], offset, addr, regNames[rd], data);
         }
+    }
+}
+
+/* THUMB state LDM/STM */
+template<bool isL>
+void tLoadMultiple(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rn = (instr >> 8) & 7;
+
+    const auto reglist = (u32)instr & 0xFF;
+
+    assert(reglist);
+
+    // Get base address from source register
+    auto addr = cpu->r[rn];
+
+    if constexpr (!isL) { // Handle STM writeback
+        if (reglist & (1 << rn)) {
+            // ARM7 stores the old base only if Rn is the first register in reglist.
+            // If not, it stores the NEW base. Handle this here
+            if ((cpu->cpuID == 7) && ((int)rn == std::__countr_zero(reglist))) {
+                cpu->r[rn] = addr + 4 * std::__popcount(reglist);
+            }
+
+            // ARM9 always stores the OLD base, so don't do anything here
+        }
+    } 
+
+    for (auto rlist = reglist; rlist != 0; ) {
+        // Get next register
+        const auto i = std::__countr_zero(rlist);
+
+        if constexpr (isL) {
+            cpu->r[i] = cpu->read32(addr);
+
+            if (doDisasm) std::printf("%s = [0x%08X] = 0x%08X\n", regNames[i], addr, cpu->r[i]);
+        } else {
+            if (doDisasm) std::printf("[0x%08X] = %s = 0x%08X\n", addr, regNames[i], cpu->r[i]);
+
+            cpu->write32(addr, cpu->r[i]);
+        }
+
+        addr += 4;
+
+        rlist ^= 1 << i;
+    }
+
+    if constexpr (isL) {
+        if (reglist & (1 << rn)) {
+            // ARM7 doesn't write back the new base if Rn is in reglist
+
+            // ARM9 writes back the new base if Rn is the only reg in reglist OR not the last one
+            if ((cpu->cpuID == 9) && ((std::__popcount(reglist) == 1) || ((15 - std::__countl_zero(reglist)) != (int)rn))) {
+                cpu->r[rn] = addr;
+            }
+        } else {
+            cpu->r[rn] = addr;
+        }
+    } else {
+        cpu->r[rn] = addr;
+    }
+
+    if (doDisasm) {
+        const auto list = getReglist(reglist);
+
+        std::printf("[ARM%d:T    ] [0x%08X] %sIA %s!, {%s}; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", regNames[rn], list.c_str(), regNames[rn], cpu->r[rn]);
     }
 }
 
@@ -1741,6 +1836,11 @@ void init() {
     instrTableTHUMB[0x2F5] = &tPop<1, 1>;
     instrTableTHUMB[0x2F6] = &tPop<1, 1>;
     instrTableTHUMB[0x2F7] = &tPop<1, 1>;
+
+    for (int i = 0x300; i < 0x320; i++) {
+        instrTableTHUMB[i | (0 << 5)] = &tLoadMultiple<0>;
+        instrTableTHUMB[i | (1 << 5)] = &tLoadMultiple<1>;
+    }
 
     for (int i = 0x340; i < 0x380; i++) {
         if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
