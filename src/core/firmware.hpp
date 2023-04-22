@@ -10,6 +10,7 @@
 namespace nds::firmware {
 
 void init(const char *firmPath);
+void release();
 
 u8 read();
 
