@@ -12,6 +12,7 @@ set(SOURCES
     src/core/bus.cpp
     src/core/dma.cpp
     src/core/firmware.cpp
+    src/core/intc.cpp
     src/core/ipc.cpp
     src/core/MariDS.cpp
     src/core/spi.cpp
@@ -27,6 +28,7 @@ set(HEADERS
     src/core/bus.hpp
     src/core/dma.hpp
     src/core/firmware.hpp
+    src/core/intc.hpp
     src/core/ipc.hpp
     src/core/MariDS.hpp
     src/core/spi.hpp

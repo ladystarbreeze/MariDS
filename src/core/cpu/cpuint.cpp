@@ -1859,6 +1859,8 @@ void init() {
 }
 
 void run(CPU *cpu, i64 runCycles) {
+    if (cpu->isHalted) return;
+    
     for (auto c = runCycles; c > 0; c--) {
         (cpu->cpsr.t) ? decodeTHUMB(cpu) : decodeARM(cpu);
 

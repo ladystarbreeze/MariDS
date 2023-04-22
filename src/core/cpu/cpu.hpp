@@ -72,7 +72,6 @@ struct PSR {
                     exit(0);
             }
 
-            assert(t == !!(data & (1 << 5))); // :)
 
             f = data & (1 << 6);
             i = data & (1 << 7);
@@ -112,6 +111,8 @@ struct CPU {
 
     bool cout; // Carry out
 
+    bool isHalted, irqPending;
+
     u8  (*read8 )(u32);
     u16 (*read16)(u32);
     u32 (*read32)(u32);
@@ -123,6 +124,15 @@ struct CPU {
     u32 get(u32 idx);
 
     void changeMode(CPUMode newMode);
+
+    void halt();
+    void unhalt();
+
+    void raiseIRQException();
+
+    void setIRQPending(bool irq);
+
+    void checkInterrupt();
 
 private:
     u32 rFIQ[5];

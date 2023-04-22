@@ -8,6 +8,12 @@
 #include <cassert>
 #include <cstdio>
 
+#include "intc.hpp"
+
+namespace nds::timer {
+
+using IntSource = intc::IntSource;
+
 enum class TimerReg {
     TMCNT   = 0x04000100,
     TMCNT_H = 0x04000102,
@@ -30,8 +36,6 @@ struct Timer {
 
 Timer timers[4];
 
-namespace nds::timer {
-
 void checkCascade(int tmID) {
     auto &tm = timers[tmID];
 
@@ -44,11 +48,7 @@ void checkCascade(int tmID) {
             // Reload counter, trigger interrupt
             tm.ctr = tm.reload;
 
-            if (cnt.irqen) {
-                std::printf("[Timer:ARM7] Unhandled timer %d IRQ\n", tmID);
-
-                exit(0);
-            }
+            if (cnt.irqen) intc::sendInterrupt7((IntSource)(tmID + 3));
 
             // Check previous timer for cascade
             if (tmID > 0) checkCascade(tmID - 1);
@@ -81,11 +81,7 @@ void run(i64 runCycles) {
                 // Reload counter, trigger interrupt
                 tm.ctr = tm.reload;
 
-                if (cnt.irqen) {
-                    std::printf("[Timer:ARM7] Unhandled timer %d IRQ\n", i);
-
-                    exit(0);
-                }
+                if (cnt.irqen) intc::sendInterrupt7((IntSource)(i + 3));
 
                 // Check previous timer for cascade
                 if (i > 0) checkCascade(i - 1);

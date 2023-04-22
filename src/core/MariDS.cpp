@@ -38,4 +38,22 @@ void run() {
     }
 }
 
+void haltCPU(int cpuID) {
+    assert((cpuID == 7) || (cpuID == 9));
+
+    (cpuID == 7) ? arm7.halt() : arm9.halt();
+}
+
+void unhaltCPU(int cpuID) {
+    assert((cpuID == 7) || (cpuID == 9));
+
+    (cpuID == 7) ? arm7.unhalt() : arm9.unhalt();
+}
+
+void setIRQPending(int cpuID, bool irq) {
+    assert((cpuID == 7) || (cpuID == 9));
+
+    (cpuID == 7) ? arm7.setIRQPending(irq) : arm9.setIRQPending(irq);
+}
+
 }

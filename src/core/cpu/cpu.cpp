@@ -155,4 +155,41 @@ void CPU::changeMode(CPUMode newMode) {
     }
 }
 
+void CPU::halt() {
+    isHalted = true;
+}
+
+void CPU::unhalt() {
+    isHalted = false;
+}
+
+void CPU::raiseIRQException() {
+    const auto lr = get(CPUReg::PC) + 2 * cpsr.t;
+
+    std::printf("[ARM%d%s    ] IRQ exception @ 0x%08X\n", cpuID, (cpsr.t) ? ":T" : "  ", r[CPUReg::PC]);
+
+    spsrIRQ.set(0xF, cpsr.get());
+
+    cpsr.t = false; // Return to ARM state
+    cpsr.f = false; // Keep FIQ enabled
+    cpsr.i = true;  // Block IRQs
+
+    changeMode(CPUMode::IRQ);
+
+    const auto vectorBase = (cpuID == 7) ? VectorBase::ARM7 : VectorBase::ARM9;
+
+    r[CPUReg::LR] = lr;
+    r[CPUReg::PC] = static_cast<u32>(vectorBase) | 0x18;
+}
+
+void CPU::setIRQPending(bool irq) {
+    irqPending = irq;
+
+    checkInterrupt();
+}
+
+void CPU::checkInterrupt() {
+    if (irqPending && !cpsr.i) raiseIRQException();
+}
+
 }
