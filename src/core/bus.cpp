@@ -8,6 +8,8 @@
 #include <cstdio>
 
 #include "ipc.hpp"
+#include "spi.hpp"
+#include "timer.hpp"
 #include "../common/file.hpp"
 
 namespace nds::bus {
@@ -17,6 +19,8 @@ namespace nds::bus {
 /* ARM7 base addresses */
 enum class Memory7Base : u32 {
     BIOS  = 0x00000000,
+    Main  = 0x02000000,
+    Timer = 0x04000100,
     IPC   = 0x04000180,
     SWRAM = 0x03000000,
     WRAM  = 0x03800000,
@@ -26,6 +30,7 @@ enum class Memory7Base : u32 {
 /* ARM7 memory limits */
 enum class Memory7Limit : u32 {
     BIOS  = 0x00004000,
+    Main  = 0x00400000,
     SWRAM = 0x00008000,
     WRAM  = 0x00010000,
 };
@@ -92,14 +97,21 @@ void init(const char *bios7Path, const char *bios9Path) {
 }
 
 u8 read8ARM7(u32 addr) {
-    switch (addr) {
-        case static_cast<u32>(Memory9Base::MMIO) + 0x300:
-            std::printf("[Bus:ARM7  ] Read8 @ POSTFLG\n");
-            return postflg7;
-        default:
-            std::printf("[Bus:ARM7  ] Unhandled read8 @ 0x%08X\n", addr);
+    if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
+        return wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)];
+    } else {
+        switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x138:
+                std::printf("[Bus:ARM7  ] Read8 @ RTC\n");
+                return 0;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x300:
+                std::printf("[Bus:ARM7  ] Read8 @ POSTFLG\n");
+                return postflg7;
+            default:
+                std::printf("[Bus:ARM7  ] Unhandled read8 @ 0x%08X\n", addr);
 
-            exit(0);
+                exit(0);
+        }
     }
 }
 
@@ -110,6 +122,8 @@ u16 read16ARM7(u32 addr) {
 
     if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
         std::memcpy(&data, &bios7[addr & (static_cast<u32>(Memory7Limit::BIOS) - 1)], sizeof(u16));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Main), 2 * static_cast<u32>(Memory7Limit::Main))) {
+        std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory7Limit::Main) - 1)], sizeof(u16));
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
         return ipc::read16ARM7(addr);
     } else {
@@ -129,12 +143,23 @@ u32 read32ARM7(u32 addr) {
 
     u32 data;
 
-    if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
-        std::memcpy(&data, &wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], sizeof(u32));
-    } else if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
+    if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
         std::memcpy(&data, &bios7[addr & (static_cast<u32>(Memory7Limit::BIOS) - 1)], sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Main), 2 * static_cast<u32>(Memory7Limit::Main))) {
+        std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory7Limit::Main) - 1)], sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
+        std::memcpy(&data, &wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], sizeof(u32));
     } else {
         switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
+                std::printf("[Bus:ARM9  ] Read32 @ ROMCTRL\n");
+                return 1 << 23;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
+                std::printf("[Bus:ARM9  ] Read32 @ SPICNT/SPIDATA\n");
+                return (u32)spi::readSPICNT() | ((u32)spi::readSPIDATA() << 16);
+            case 0x04100010:
+                std::printf("[Bus:ARM9  ] Read32 @ ROMDATA\n");
+                return -1;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read32 @ 0x%08X\n", addr);
 
@@ -196,11 +221,25 @@ u32 read32ARM9(u32 addr) {
 }
 
 void write8ARM7(u32 addr, u8 data) {
-    if (false) {
+    if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
+        wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)] = data;
     } else {
         switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x138:
+                std::printf("[Bus:ARM9  ] Write8 @ RTC = 0x%02X\n", data);
+                break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1A1:
                 std::printf("[Bus:ARM9  ] Write8 @ AUXSPICNT_HI = 0x%02X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1A8:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1A9:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1AA:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1AB:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1AC:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1AD:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1AE:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1AF:
+                std::printf("[Bus:ARM9  ] Write8 @ ROMCMD[%u] = 0x%02X\n", addr & 7, data);
                 break;
             case static_cast<u32>(Memory7Base::MMIO) + 0x208:
                 std::printf("[Bus:ARM7  ] Write8 @ IME = 0x%02X\n", data);
@@ -216,7 +255,11 @@ void write8ARM7(u32 addr, u8 data) {
 void write16ARM7(u32 addr, u16 data) {
     assert(!(addr & 1));
 
-    if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
+    if (inRange(addr, static_cast<u32>(Memory7Base::Main), 2 * static_cast<u32>(Memory7Limit::Main))) {
+        std::memcpy(&mainMem[addr & (static_cast<u32>(Memory7Limit::Main) - 1)], &data, sizeof(u16));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::SWRAM), 16 * 16 * static_cast<u32>(Memory7Limit::SWRAM))) {
+        std::memcpy(&swram7[addr & swramLimit7], &data, sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
         return ipc::write16ARM7(addr, data);
     } else {
         switch (addr) {
@@ -231,10 +274,16 @@ void write16ARM7(u32 addr, u16 data) {
 void write32ARM7(u32 addr, u32 data) {
     assert(!(addr & 3));
     
-    if (inRange(addr, static_cast<u32>(Memory7Base::SWRAM), 16 * 16 * static_cast<u32>(Memory7Limit::SWRAM))) {
+    if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
+        std::printf("[Bus:ARM7  ] Bad write32 @ BIOS (0x%08X) = 0x%08X\n", addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Main), 2 * static_cast<u32>(Memory7Limit::Main))) {
+        std::memcpy(&mainMem[addr & (static_cast<u32>(Memory7Limit::Main) - 1)], &data, sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::SWRAM), 16 * 16 * static_cast<u32>(Memory7Limit::SWRAM))) {
         std::memcpy(&swram7[addr & swramLimit7], &data, sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
         std::memcpy(&wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], &data, sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Timer), 0x10)) {
+        return timer::write32ARM7(addr, data);
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:

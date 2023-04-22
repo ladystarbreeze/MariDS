@@ -12,6 +12,8 @@ set(SOURCES
     src/core/bus.cpp
     src/core/ipc.cpp
     src/core/MariDS.cpp
+    src/core/spi.cpp
+    src/core/timer.cpp
     src/core/cpu/cpu.cpp
     src/core/cpu/cpuint.cpp
     src/core/cpu/cp15.cpp
@@ -23,6 +25,8 @@ set(HEADERS
     src/core/bus.hpp
     src/core/ipc.hpp
     src/core/MariDS.hpp
+    src/core/spi.hpp
+    src/core/timer.hpp
     src/core/cpu/cpu.hpp
     src/core/cpu/cpuint.hpp
     src/core/cpu/cp15.hpp
