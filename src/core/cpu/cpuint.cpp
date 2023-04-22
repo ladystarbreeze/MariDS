@@ -520,7 +520,8 @@ void aDataProcessing(CPU *cpu, u32 instr) {
                         std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
                         break;
                     default:
-                        assert(false);
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
+                        break;
                 }
             } else {
                 assert(false);
@@ -612,6 +613,105 @@ void aExtraLoad(CPU *cpu, u32 instr) {
             std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[opcode], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
         } else {
             assert(false); // TODO: LDRD/STRD
+        }
+    }
+}
+
+/* ARM state LDM/STM */
+template<bool isP, bool isU, bool isS, bool isW, bool isL>
+void aLoadMultiple(CPU *cpu, u32 instr) {
+    assert(!isS);
+
+    // Get operands
+    const auto rn = (instr >> 16) & 0xF;
+
+    assert(rn != CPUReg::PC); // Please no.
+
+    const auto reglist = instr & 0xFFFF;
+
+    assert(reglist);
+
+    auto P = isP;
+
+    // Get base address from source register
+    auto addr = cpu->r[rn];
+
+    if constexpr (!isU) { // All LDM/STM variants start at the *lowest* memory address, calculate this for decrementing LDM/STM
+        addr -= 4 * std::__popcount(reglist);
+
+        P = !P; // Flip pre-index bit for all decrementing LDM/STM
+    }
+
+    if constexpr (isW && !isL) { // Handle STM writeback
+        if (reglist & (1 << rn)) {
+            // ARM7 stores the old base only if Rn is the first register in reglist.
+            // If not, it stores the NEW base. Handle this here
+            if ((cpu->cpuID == 7) && ((int)rn == std::__countr_zero(reglist))) {
+                cpu->r[rn] = addr;
+            }
+
+            // ARM9 always stores the OLD base, so don't do anything here
+        } else {
+            cpu->r[rn] = addr;
+        }
+    } 
+
+    for (auto rlist = reglist; rlist != 0; ) {
+        // Get next register
+        const auto i = std::__countr_zero(rlist);
+
+        // Handle pre-index
+        if (P) addr += 4;
+
+        if constexpr (isL) {
+            cpu->r[i] = cpu->read32(addr);
+
+            if (doDisasm) std::printf("%s = [0x%08X] = 0x%08X\n", regNames[i], addr, cpu->r[i]);
+
+            if ((i == CPUReg::PC) && (cpu->cpuID == 9)) {
+                // Change processor state
+                cpu->cpsr.t = cpu->r[CPUReg::PC & 1];
+
+                cpu->r[CPUReg::PC] &= ~1;
+            }
+        } else {
+            if (doDisasm) std::printf("[0x%08X] = %s = 0x%08X\n", addr, regNames[i], cpu->r[i]);
+
+            cpu->write32(addr, cpu->r[i]);
+        }
+
+        // Handle post-index
+        if (!P) addr += 4;
+
+        rlist ^= 1 << i;
+    }
+
+    if constexpr (isW) {
+        if constexpr (!isU) addr -= 4 * std::__popcount(reglist); // Calculate lowest base address
+
+        if constexpr (isL) {
+            if (reglist & (1 << rn)) {
+                // ARM7 doesn't write back the new base if Rn is in reglist
+
+                // ARM9 writes back the new base if Rn is the only reg in reglist OR not the last one
+                if ((cpu->cpuID == 9) && ((std::__popcount(reglist) == 1) || ((15 - std::__countl_zero(reglist)) != (int)rn))) {
+                    cpu->r[rn] = addr;
+                }
+            } else {
+                cpu->r[rn] = addr;
+            }
+        } else {
+            cpu->r[rn] = addr;
+        }
+    }
+
+    if (doDisasm) {
+        const auto list = getReglist(reglist);
+
+        if constexpr (isW) {
+            std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str(), regNames[rn], cpu->r[rn]);
+        } else {
+            std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str());
         }
     }
 }
@@ -818,23 +918,23 @@ void tBranchExchange(CPU *cpu, u16 instr) {
     // Get source register
     const auto rm = (instr >> 3) & 0xF; // Includes H bit
 
-    assert(rm != CPUReg::PC); // Stoobit
-
     if constexpr (isLink) {
         assert(rm != CPUReg::LR);
 
         cpu->r[CPUReg::LR] = cpu->r[CPUReg::PC];
     }
 
-    cpu->r[CPUReg::PC] = cpu->r[rm] & ~1;
+    const auto addr = cpu->get(rm);
 
-    cpu->cpsr.t = cpu->r[rm] & 1;
+    cpu->r[CPUReg::PC] = addr & ~1;
+
+    cpu->cpsr.t = addr & 1;
 
     if (doDisasm) {
         if constexpr (isLink) {
-            std::printf("[ARM%d:T    ] [0x%08X] BLX %s; PC = 0x%08X, LR = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], cpu->r[CPUReg::PC], cpu->r[CPUReg::LR]);
+            std::printf("[ARM%d:T    ] [0x%08X] BLX %s; PC = 0x%08X, LR = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], addr, cpu->r[CPUReg::LR]);
         } else {
-            std::printf("[ARM%d:T    ] [0x%08X] BX %s; PC = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], cpu->r[CPUReg::PC]);
+            std::printf("[ARM%d:T    ] [0x%08X] BX %s; PC = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rm], addr);
         }
     }
 }
@@ -932,6 +1032,36 @@ void tDataProcessingLarge(CPU *cpu, u16 instr) {
     if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %s%s %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], (opcode != DPOpcode::CMP) ? "S" : "", regNames[rd], imm, regNames[rd], cpu->r[rd]);
 }
 
+/* THUMB Data Processing (high registers) */
+template<DPOpcode opcode>
+void tDataProcessingSpecial(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr & 7) | ((instr >> 4) & 8);
+    const auto rm = (instr >> 3) & 0xF;
+
+    assert((rd != CPUReg::PC) && (rm != CPUReg::PC));
+
+    switch (opcode) {
+        case DPOpcode::ADD:
+            cpu->r[rd] += cpu->r[rm];
+            break;
+        case DPOpcode::CMP:
+            setSubFlags(cpu, cpu->r[rd], cpu->r[rm], cpu->r[rd] - cpu->r[rm]);
+            break;
+        case DPOpcode::MOV:
+            cpu->r[rd] = cpu->r[rm];
+            break;
+    }
+
+    if (doDisasm) {
+        if constexpr (opcode == DPOpcode::CMP) {
+            std::printf("[ARM%d:T    ] [0x%08X] CMP %s, %s; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rm], regNames[rd], cpu->r[rd], regNames[rm], cpu->r[rm]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] %s %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], regNames[rd], regNames[rm], regNames[rd], cpu->r[rd]);
+        }
+    }
+}
+
 /* Load from literal pool */
 void tLoadFromPool(CPU *cpu, u16 instr) {
     // Get operands
@@ -944,6 +1074,33 @@ void tLoadFromPool(CPU *cpu, u16 instr) {
     cpu->r[rd] = cpu->read32(addr);
 
     if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] LDR %s, [0x%08X]; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], addr, regNames[rd], cpu->r[rd]);
+}
+
+/* Load from stack */
+template<bool isL>
+void tLoadFromStack(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 8) & 7;
+
+    const auto offset = (u32)(u8)instr << 2;
+
+    const auto addr = cpu->r[CPUReg::SP] + offset;
+
+    if constexpr (isL) {
+        assert(!(addr & 3));
+
+        cpu->r[rd] = cpu->read32(addr);
+    } else {
+        cpu->write32(addr & ~3, cpu->r[rd]);
+    }
+
+    if (doDisasm) {
+        if constexpr (isL) {
+            std::printf("[ARM%d:T    ] [0x%08X] LDR %s, [SP, 0x%02X]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], offset, regNames[rd], addr, cpu->r[rd]);
+        } else {
+            std::printf("[ARM%d:T    ] [0x%08X] STR %s, [SP, 0x%02X]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], offset, addr, regNames[rd], cpu->r[rd]);
+        }
+    }
 }
 
 /* Load/store halfword with immediate offset */
@@ -1065,7 +1222,7 @@ void tPop(CPU *cpu, u16 instr) {
         if constexpr (isL) {
             cpu->r[i] = cpu->read32(addr);
 
-            if (doDisasm) std::printf("R%u = [0x%08X] = 0x%08X\n", i, addr, cpu->r[i]);
+            if (doDisasm) std::printf("%s = [0x%08X] = 0x%08X\n", regNames[i], addr, cpu->r[i]);
 
             if ((i == CPUReg::PC) && (cpu->cpuID == 9)) {
                 // Change processor state
@@ -1074,7 +1231,7 @@ void tPop(CPU *cpu, u16 instr) {
                 cpu->r[CPUReg::PC] &= ~1;
             }
         } else {
-            if (doDisasm) std::printf("[0x%08X] = R%u = 0x%08X\n", addr, i, cpu->r[i]);
+            if (doDisasm) std::printf("[0x%08X] = %s = 0x%08X\n", addr, regNames[i], cpu->r[i]);
 
             cpu->write32(addr, cpu->r[i]);
         }
@@ -1311,6 +1468,41 @@ void init() {
         }
     }
 
+    for (int i = 0x800; i < 0x810; i++) {
+        instrTableARM[i | (0x00 << 4)] = &aLoadMultiple<0, 0, 0, 0, 0>;
+        instrTableARM[i | (0x01 << 4)] = &aLoadMultiple<0, 0, 0, 0, 1>;
+        instrTableARM[i | (0x02 << 4)] = &aLoadMultiple<0, 0, 0, 1, 0>;
+        instrTableARM[i | (0x03 << 4)] = &aLoadMultiple<0, 0, 0, 1, 1>;
+        instrTableARM[i | (0x04 << 4)] = &aLoadMultiple<0, 0, 1, 0, 0>;
+        instrTableARM[i | (0x05 << 4)] = &aLoadMultiple<0, 0, 1, 0, 1>;
+        instrTableARM[i | (0x06 << 4)] = &aLoadMultiple<0, 0, 1, 1, 0>;
+        instrTableARM[i | (0x07 << 4)] = &aLoadMultiple<0, 0, 1, 1, 1>;
+        instrTableARM[i | (0x08 << 4)] = &aLoadMultiple<0, 1, 0, 0, 0>;
+        instrTableARM[i | (0x09 << 4)] = &aLoadMultiple<0, 1, 0, 0, 1>;
+        instrTableARM[i | (0x0A << 4)] = &aLoadMultiple<0, 1, 0, 1, 0>;
+        instrTableARM[i | (0x0B << 4)] = &aLoadMultiple<0, 1, 0, 1, 1>;
+        instrTableARM[i | (0x0C << 4)] = &aLoadMultiple<0, 1, 1, 0, 0>;
+        instrTableARM[i | (0x0D << 4)] = &aLoadMultiple<0, 1, 1, 0, 1>;
+        instrTableARM[i | (0x0E << 4)] = &aLoadMultiple<0, 1, 1, 1, 0>;
+        instrTableARM[i | (0x0F << 4)] = &aLoadMultiple<0, 1, 1, 1, 1>;
+        instrTableARM[i | (0x10 << 4)] = &aLoadMultiple<1, 0, 0, 0, 0>;
+        instrTableARM[i | (0x11 << 4)] = &aLoadMultiple<1, 0, 0, 0, 1>;
+        instrTableARM[i | (0x12 << 4)] = &aLoadMultiple<1, 0, 0, 1, 0>;
+        instrTableARM[i | (0x13 << 4)] = &aLoadMultiple<1, 0, 0, 1, 1>;
+        instrTableARM[i | (0x14 << 4)] = &aLoadMultiple<1, 0, 1, 0, 0>;
+        instrTableARM[i | (0x15 << 4)] = &aLoadMultiple<1, 0, 1, 0, 1>;
+        instrTableARM[i | (0x16 << 4)] = &aLoadMultiple<1, 0, 1, 1, 0>;
+        instrTableARM[i | (0x17 << 4)] = &aLoadMultiple<1, 0, 1, 1, 1>;
+        instrTableARM[i | (0x18 << 4)] = &aLoadMultiple<1, 1, 0, 0, 0>;
+        instrTableARM[i | (0x19 << 4)] = &aLoadMultiple<1, 1, 0, 0, 1>;
+        instrTableARM[i | (0x1A << 4)] = &aLoadMultiple<1, 1, 0, 1, 0>;
+        instrTableARM[i | (0x1B << 4)] = &aLoadMultiple<1, 1, 0, 1, 1>;
+        instrTableARM[i | (0x1C << 4)] = &aLoadMultiple<1, 1, 1, 0, 0>;
+        instrTableARM[i | (0x1D << 4)] = &aLoadMultiple<1, 1, 1, 0, 1>;
+        instrTableARM[i | (0x1E << 4)] = &aLoadMultiple<1, 1, 1, 1, 0>;
+        instrTableARM[i | (0x1F << 4)] = &aLoadMultiple<1, 1, 1, 1, 1>;
+    }
+
     for (int i = 0xA00; i < 0xB00; i++) {
         instrTableARM[i | 0x000] = &aBranch<false>;
         instrTableARM[i | 0x100] = &aBranch<true>;
@@ -1359,6 +1551,12 @@ void init() {
     instrTableTHUMB[0x10E] = &tDataProcessing<THUMBDPOpcode::BIC>;
     instrTableTHUMB[0x10F] = &tDataProcessing<THUMBDPOpcode::MVN>;
 
+    for (int i = 0x110; i < 0x114; i++) {
+        instrTableTHUMB[i | (0 << 2)] = &tDataProcessingSpecial<DPOpcode::ADD>;
+        instrTableTHUMB[i | (1 << 2)] = &tDataProcessingSpecial<DPOpcode::CMP>;
+        instrTableTHUMB[i | (2 << 2)] = &tDataProcessingSpecial<DPOpcode::MOV>;
+    }
+
     instrTableTHUMB[0x11C] = &tBranchExchange<false>;
     instrTableTHUMB[0x11D] = &tBranchExchange<false>;
     instrTableTHUMB[0x11E] = &tBranchExchange<true>;
@@ -1383,6 +1581,11 @@ void init() {
 
     for (int i = 0x200; i < 0x240; i++) {
         instrTableTHUMB[i] = (i & (1 << 5)) ? &tLoadHalfwordImmediateOffset<true> : &tLoadHalfwordImmediateOffset<false>;
+    }
+
+    for (int i = 0x240; i < 0x260; i++) {
+        instrTableTHUMB[i | (0 << 5)] = &tLoadFromStack<false>;
+        instrTableTHUMB[i | (1 << 5)] = &tLoadFromStack<true>;
     }
 
     instrTableTHUMB[0x2D0] = &tPop<0, 0>;
