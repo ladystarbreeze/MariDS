@@ -13,7 +13,7 @@ namespace nds::cpu::interpreter {
 
 // Interpreter constants
 
-constexpr auto doDisasm = true;
+constexpr auto doDisasm = false;
 
 constexpr const char *condNames[] = {
     "EQ", "NE", "HS", "LO", "MI", "PL", "VS", "VC",
@@ -1039,6 +1039,26 @@ void tDataProcessing(CPU *cpu, u16 instr) {
     cpu->cout = cpu->cpsr.t; // Required for bit flags
 
     switch (opcode) {
+        case THUMBDPOpcode::AND:
+            cpu->r[rd] &= cpu->r[rm];
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::EOR:
+            cpu->r[rd] ^= cpu->r[rm];
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::LSL:
+            cpu->r[rd] = shift<ShiftType::LSL, false>(cpu, cpu->r[rd], cpu->r[rm]);
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::LSR:
+            cpu->r[rd] = shift<ShiftType::LSR, false>(cpu, cpu->r[rd], cpu->r[rm]);
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
         case THUMBDPOpcode::CMP:
             setSubFlags(cpu, cpu->r[rd], cpu->r[rm], cpu->r[rd] - cpu->r[rm]);
             break;
@@ -1142,6 +1162,23 @@ void tDataProcessingSpecial(CPU *cpu, u16 instr) {
             std::printf("[ARM%d:T    ] [0x%08X] %s %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], regNames[rd], regNames[rm], regNames[rd], cpu->r[rd]);
         }
     }
+}
+
+/* THUMB Get SP/PC relative address */
+template<bool isSP>
+void tGetAddress(CPU *cpu, u16 instr) {
+    // Get operands
+    const auto rd = (instr >> 8) & 7;
+
+    const auto offset = (u32)(u8)instr << 2;
+
+    if constexpr (isSP) {
+        cpu->r[rd] = cpu->r[CPUReg::SP] + offset;
+    } else {
+        cpu->r[rd] = (cpu->get(CPUReg::PC) & ~3) + offset;
+    }
+
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] ADD %s, %s, 0x%03X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], (isSP) ? "SP" : "PC", offset, regNames[rd], cpu->r[rd]);
 }
 
 /* Load from literal pool */
@@ -1676,6 +1713,11 @@ void init() {
     for (int i = 0x240; i < 0x260; i++) {
         instrTableTHUMB[i | (0 << 5)] = &tLoadFromStack<0>;
         instrTableTHUMB[i | (1 << 5)] = &tLoadFromStack<1>;
+    }
+
+    for (int i = 0x280; i < 0x2A0; i++) {
+        instrTableTHUMB[i | (0 << 5)] = &tGetAddress<0>;
+        instrTableTHUMB[i | (1 << 5)] = &tGetAddress<1>;
     }
 
     instrTableTHUMB[0x2C0] = &tAdjustSP<0>;
