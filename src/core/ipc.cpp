@@ -54,7 +54,7 @@ u16 read16ARM9(u32 addr) {
     switch (addr) {
         case static_cast<u32>(IPCReg::IPCSYNC):
             {
-                std::printf("[IPC:ARM9  ] Read16 @ IPCSYNC\n");
+                //std::printf("[IPC:ARM9  ] Read16 @ IPCSYNC\n");
 
                 auto &sync      = ipcsync[1];
                 auto &otherSync = ipcsync[0];
