@@ -13,7 +13,7 @@ namespace nds::cpu::interpreter {
 
 // Interpreter constants
 
-constexpr auto doDisasm = false;
+auto doDisasm = false;
 
 constexpr const char *condNames[] = {
     "EQ", "NE", "HS", "LO", "MI", "PL", "VS", "VC",
@@ -44,7 +44,7 @@ constexpr const char *shiftNames[] = {
 };
 
 constexpr const char *thumbLoadNames[] = {
-    "STR",
+    "STR", "N/A", "N/A", "N/A", "LDR", "LDRH", "LDRB",
 };
 
 /* Condition codes */
@@ -60,7 +60,7 @@ enum class DPOpcode {
 };
 
 /* Extra loadstores */
-enum ExtraLoadOpcode {
+enum class ExtraLoadOpcode {
     STRH  = 1,
     LDRD  = 2,
     STRD  = 3,
@@ -76,8 +76,11 @@ enum class THUMBDPOpcode {
 };
 
 /* THUMB loadstores */
-enum THUMBLoadOpcode {
-    STR,
+enum class THUMBLoadOpcode {
+    STR  = 0,
+    LDR  = 4,
+    LDRH = 5,
+    LDRB = 6,
 };
 
 enum class ShiftType {
@@ -608,7 +611,7 @@ void aExtraLoad(CPU *cpu, u32 instr) {
             cpu->r[rd] = cpu->read16(addr);
             break;
         default:
-            std::printf("[ARM%d      ] Unhandled Extra Load opcode %s\n", cpu->cpuID, extraLoadNames[opcode]);
+            std::printf("[ARM%d      ] Unhandled Extra Load opcode %s\n", cpu->cpuID, extraLoadNames[static_cast<int>(opcode)]);
 
             exit(0);
     }
@@ -640,9 +643,9 @@ void aExtraLoad(CPU *cpu, u32 instr) {
         const auto cond = condNames[instr >> 28];
 
         if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
-            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%02X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[opcode], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%02X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
         } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
-            std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[opcode], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
+            std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
         } else {
             assert(false); // TODO: LDRD/STRD
         }
@@ -790,6 +793,8 @@ void aMSR(CPU *cpu, u32 instr) {
         }
 
         cpu->cpsr.set(mask, op);
+
+        cpu->checkInterrupt();
     }
 
     if (doDisasm) {
@@ -852,10 +857,21 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
 
             cpu->r[rd] = cpu->read8(addr);
         } else {
-            assert(rd != CPUReg::PC); // Could happen, we'll implement this when we need it
-            assert(!(addr & 3));      // See above
+            if (rd == CPUReg::PC) {
+                const auto target = cpu->read32(addr);
 
-            cpu->r[rd] = cpu->read32(addr);
+                if (cpu->cpuID == 9) { // Change state
+                    cpu->r[CPUReg::PC] = target & ~1;
+
+                    cpu->cpsr.t = target & 1;
+                } else {
+                    cpu->r[CPUReg::PC] = target & ~3;
+                }
+            } else {
+                assert(!(addr & 3));
+
+                cpu->r[rd] = cpu->read32(addr);
+            }
         }
     } else { // STR/STRB
         if (rd == 15) data += 4; // STR takes an extra cycle, which causes PC to be 12 bytes ahead
@@ -1397,17 +1413,30 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
         case THUMBLoadOpcode::STR:
             cpu->write32(addr & ~3, data);
             break;
+        case THUMBLoadOpcode::LDR:
+            assert(!(addr & 3));
+
+            cpu->r[rd] = cpu->read32(addr);
+            break;
+        case THUMBLoadOpcode::LDRH:
+            assert(!(addr & 1));
+
+            cpu->r[rd] = cpu->read16(addr);
+            break;
+        case THUMBLoadOpcode::LDRB:
+            cpu->r[rd] = cpu->read8(addr);
+            break;
         default:
-            std::printf("[ARM%d:T    ] Unhandled register offset load instruction 0x%04X @ 0x%08X\n", cpu->cpuID, instr, cpu->cpc);
+            std::printf("[ARM%d:T    ] Unhandled register offset %s\n", cpu->cpuID, thumbLoadNames[static_cast<int>(opcode)]);
 
             exit(0);
     }
 
     if (doDisasm) {
         if constexpr (opcode == THUMBLoadOpcode::STR) {
-            std::printf("[ARM%d:T    ] [0x%08X] STR %s, [%s, %s]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], regNames[rn], regNames[rm], addr, regNames[rd], data);
+            std::printf("[ARM%d:T    ] [0x%08X] %s %s, [%s, %s]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbLoadNames[static_cast<int>(opcode)], regNames[rd], regNames[rn], regNames[rm], addr, regNames[rd], data);
         } else {
-            assert(false);
+            std::printf("[ARM%d:T    ] [0x%08X] %s %s, [%s, %s]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbLoadNames[static_cast<int>(opcode)], regNames[rd], regNames[rn], regNames[rm], regNames[rd], addr, data);
         }
     }
 }
@@ -1789,8 +1818,11 @@ void init() {
     }
 
     for (int i = 0x140; i < 0x180; i++) {
-        switch ((i >> 9) & 7) {
-            case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR>; break;
+        switch ((i >> 3) & 7) {
+            case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR >; break;
+            case 4: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDR >; break;
+            case 5: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRH>; break;
+            case 6: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRB>; break;
         }
     }
 
@@ -1860,7 +1892,9 @@ void init() {
 
 void run(CPU *cpu, i64 runCycles) {
     if (cpu->isHalted) return;
-    
+
+    if (cpu->r[CPUReg::PC] == 0x18) doDisasm = true;
+
     for (auto c = runCycles; c > 0; c--) {
         (cpu->cpsr.t) ? decodeTHUMB(cpu) : decodeARM(cpu);
 
