@@ -290,6 +290,8 @@ u32 read32ARM9(u32 addr) {
 void write8ARM7(u32 addr, u8 data) {
     if (inRange(addr, static_cast<u32>(Memory7Base::BIOS), static_cast<u32>(Memory7Limit::BIOS))) {
         std::printf("[Bus:ARM7  ] Bad write8 @ BIOS (0x%08X) = 0x%02X\n", addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Main), 2 * static_cast<u32>(Memory7Limit::Main))) {
+        mainMem[addr & (static_cast<u32>(Memory7Limit::Main) - 1)] = data;
     } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
         wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)] = data;
     } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
