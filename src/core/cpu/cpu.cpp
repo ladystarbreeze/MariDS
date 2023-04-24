@@ -194,6 +194,25 @@ void CPU::raiseIRQException() {
     r[CPUReg::PC] = static_cast<u32>(vectorBase) | 0x18;
 }
 
+void CPU::raiseSVCException() {
+    const auto lr = r[CPUReg::PC];
+
+    std::printf("[ARM%d%s    ] SVC exception @ 0x%08X\n", cpuID, (cpsr.t) ? ":T" : "  ", r[CPUReg::PC] - ((cpsr.t) ? 2 : 4));
+
+    spsrSVC.set(0xF, cpsr.get());
+
+    cpsr.t = false; // Return to ARM state
+    cpsr.f = false; // Keep FIQ enabled
+    cpsr.i = true;  // Block IRQs
+
+    changeMode(CPUMode::SVC);
+
+    const auto vectorBase = (cpuID == 7) ? VectorBase::ARM7 : VectorBase::ARM9;
+
+    r[CPUReg::LR] = lr;
+    r[CPUReg::PC] = static_cast<u32>(vectorBase) | 0x8;
+}
+
 void CPU::setIRQPending(bool irq) {
     irqPending = irq;
 

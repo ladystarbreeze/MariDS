@@ -131,6 +131,7 @@ struct CPU {
     void unhalt();
 
     void raiseIRQException();
+    void raiseSVCException();
 
     void setIRQPending(bool irq);
 
