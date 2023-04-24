@@ -13,7 +13,7 @@ namespace nds::cpu::interpreter {
 
 // Interpreter constants
 
-auto doDisasm = false;
+auto doDisasm = true;
 
 constexpr const char *condNames[] = {
     "EQ", "NE", "HS", "LO", "MI", "PL", "VS", "VC",
@@ -44,7 +44,7 @@ constexpr const char *shiftNames[] = {
 };
 
 constexpr const char *thumbLoadNames[] = {
-    "STR", "N/A", "N/A", "N/A", "LDR", "LDRH", "LDRB", "LDRSH",
+    "STR", "STRH", "N/A", "N/A", "LDR", "LDRH", "LDRB", "LDRSH",
 };
 
 /* Condition codes */
@@ -78,6 +78,7 @@ enum class THUMBDPOpcode {
 /* THUMB loadstores */
 enum class THUMBLoadOpcode {
     STR   = 0,
+    STRH  = 1,
     LDR   = 4,
     LDRH  = 5,
     LDRB  = 6,
@@ -511,6 +512,15 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
             setSubFlags(cpu, op1, op2, op1 - op2);
             break;
+        case DPOpcode::ORR:
+            {
+                const auto res = op1 | op2;
+
+                if (S) setBitFlags(cpu, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
         case DPOpcode::MOV:
             if (S) setBitFlags(cpu, op2);
 
@@ -722,7 +732,7 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
 
             if ((i == CPUReg::PC) && (cpu->cpuID == 9)) {
                 // Change processor state
-                cpu->cpsr.t = cpu->r[CPUReg::PC & 1];
+                cpu->cpsr.t = cpu->r[CPUReg::PC] & 1;
 
                 cpu->r[CPUReg::PC] &= ~1;
             }
@@ -766,6 +776,24 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
             std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str());
         }
     }
+}
+
+/* Move to Register from Status */
+template<bool isR>
+void aMRS(CPU *cpu, u32 instr) {
+    const auto rd = (instr >> 12) & 0xF;
+
+    assert(rd != CPUReg::PC); // >:(
+
+    if constexpr (isR) {
+        assert(cpu->cspsr);
+
+        cpu->r[rd] = cpu->cspsr->get();
+    } else {
+        cpu->r[rd] = cpu->cpsr.get();
+    }
+
+    if (doDisasm) std::printf("[ARM%d      ] [0x%08X] MRS %s, %sPSR; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, regNames[rd], (isR) ? "S" : "C", regNames[rd], cpu->r[rd]);
 }
 
 /* Move to Status from Register */
@@ -833,15 +861,14 @@ void aMSR(CPU *cpu, u32 instr) {
 /* ARM state Single Data Transfer */
 template<bool isP, bool isU, bool isB, bool isW, bool isL, bool isImm>
 void aSingleDataTransfer(CPU *cpu, u32 instr) {
-    if constexpr (!isImm) {
-        std::printf("[ARM%d      ] Unhandled register offset Single Data Transfer instruction 0x%08X\n", cpu->cpuID, instr);
-
-        exit(0);
-    }
-    
     // Get operands
     const auto rd = (instr >> 12) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
     const auto rn = (instr >> 16) & 0xF;
+
+    const auto stype = (ShiftType)((instr >> 5) & 3);
+
+    const auto amt = (instr >> 7) & 0x1F;
 
     auto addr = cpu->get(rn);
     auto data = cpu->get(rd);
@@ -854,7 +881,14 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
     if constexpr (isImm) {
         offset = instr & 0xFFF;
     } else {
-        assert(false);
+        assert(rm != CPUReg::PC);
+
+        switch (stype) {
+            case ShiftType::LSL: offset = shift<ShiftType::LSL, true>(cpu, cpu->r[rm], amt); break;
+            case ShiftType::LSR: offset = shift<ShiftType::LSR, true>(cpu, cpu->r[rm], amt); break;
+            case ShiftType::ASR: offset = shift<ShiftType::ASR, true>(cpu, cpu->r[rm], amt); break;
+            case ShiftType::ROR: offset = shift<ShiftType::ROR, true>(cpu, cpu->r[rm], amt); break;
+        }
     }
 
     // Handle pre-index
@@ -919,15 +953,28 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
         const auto cond = condNames[instr >> 28];
 
         if constexpr (isL) {
-            assert(isImm);
-
-            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%03X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+            if constexpr (isImm) {
+                std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%03X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+            } else {
+                std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s%s, %s %u%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", regNames[rm], shiftNames[static_cast<int>(stype)], amt, (isP) ? "]" : "", regNames[rd], addr, data);
+            }
         } else {
-            assert(isImm);
-
-            std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%03X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
+            if constexpr (isImm) {
+                std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%03X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
+            } else {
+                std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s%s, %s %u%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", regNames[rm], shiftNames[static_cast<int>(stype)], amt, (isP) ? "]" : "", addr, regNames[rd], data);
+            }
         }
     }
+}
+
+/* ARM state SWI */
+void aSWI(CPU *cpu, u32 instr) {
+    if (doDisasm) {
+        std::printf("[ARM%d      ] [0x%08X] SWI 0x%06X\n", cpu->cpuID, cpu->cpc, instr & 0xFFFFFF);
+    }
+
+    cpu->raiseSVCException();
 }
 
 // Instruction handlers (THUMB)
@@ -1078,7 +1125,7 @@ void tDataProcessing(CPU *cpu, u16 instr) {
     const auto rd = (instr >> 0) & 7;
     const auto rm = (instr >> 3) & 7;
 
-    cpu->cout = cpu->cpsr.t; // Required for bit flags
+    cpu->cout = cpu->cpsr.c; // Required for bit flags
 
     switch (opcode) {
         case THUMBDPOpcode::AND:
@@ -1157,7 +1204,7 @@ void tDataProcessingLarge(CPU *cpu, u16 instr) {
 
     const auto imm = instr & 0xFF;
 
-    cpu->cout = cpu->cpsr.t; // Required for bit flags
+    cpu->cout = cpu->cpsr.c; // Required for bit flags
 
     switch (opcode) {
         case DPOpcode::ADD:
@@ -1428,6 +1475,9 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
         case THUMBLoadOpcode::STR:
             cpu->write32(addr & ~3, data);
             break;
+        case THUMBLoadOpcode::STRH:
+            cpu->write16(addr & ~1, data);
+            break;
         case THUMBLoadOpcode::LDR:
             assert(!(addr & 3));
 
@@ -1453,7 +1503,7 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
     }
 
     if (doDisasm) {
-        if constexpr (opcode == THUMBLoadOpcode::STR) {
+        if constexpr ((opcode == THUMBLoadOpcode::STR) || (opcode == THUMBLoadOpcode::STRH)) {
             std::printf("[ARM%d:T    ] [0x%08X] %s %s, [%s, %s]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbLoadNames[static_cast<int>(opcode)], regNames[rd], regNames[rn], regNames[rm], addr, regNames[rd], data);
         } else {
             std::printf("[ARM%d:T    ] [0x%08X] %s %s, [%s, %s]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbLoadNames[static_cast<int>(opcode)], regNames[rd], regNames[rn], regNames[rm], regNames[rd], addr, data);
@@ -1489,7 +1539,7 @@ void tPop(CPU *cpu, u16 instr) {
 
             if ((i == CPUReg::PC) && (cpu->cpuID == 9)) {
                 // Change processor state
-                cpu->cpsr.t = cpu->r[CPUReg::PC & 1];
+                cpu->cpsr.t = cpu->r[CPUReg::PC] & 1;
 
                 cpu->r[CPUReg::PC] &= ~1;
             }
@@ -1649,7 +1699,9 @@ void init() {
     //instrTableARM[0x01D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 0, 0>;
     //instrTableARM[0x01F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 0, 0>;
 
+    instrTableARM[0x100] = &aMRS<0>;
     instrTableARM[0x120] = &aMSR<0, 0>;
+    instrTableARM[0x140] = &aMRS<1>;
     instrTableARM[0x160] = &aMSR<1, 0>;
     
     instrTableARM[0x121] = &aBX;
@@ -1771,6 +1823,10 @@ void init() {
         instrTableARM[i | 0x100] = &aBranch<1>;
     }
 
+    for (int i = 0xF00; i <= 0xFFF; i++) {
+        instrTableARM[i] = &aSWI;
+    }
+
     for (int i = 0xE00; i < 0xF00; i++) {
         if (i & 1) {
             if (i & (1 << 4)) {
@@ -1840,6 +1896,7 @@ void init() {
     for (int i = 0x140; i < 0x180; i++) {
         switch ((i >> 3) & 7) {
             case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR  >; break;
+            case 1: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STRH >; break;
             case 4: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDR  >; break;
             case 5: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRH >; break;
             case 6: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRB >; break;
