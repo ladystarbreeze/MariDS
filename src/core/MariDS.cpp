@@ -145,6 +145,8 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
         // Set CPU entry points
         arm7.setEntry(arm7Entry);
         arm9.setEntry(arm9Entry);
+
+        bus::setPOSTFLG(1);
     }
 }
 
