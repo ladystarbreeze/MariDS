@@ -19,6 +19,7 @@ constexpr const char *intNames[] = {
     "DMA 0", "DMA 1", "DMA 2", "DMA 3",
     "Key Pad",
     "GBA Slot",
+    "N/A", "N/A",
     "IPCSYNC", "IPCSEND Empty", "IPCRECV Not Empty",
     "NDS Slot Done", "NDS Slot IREQ",
     "GXFIFO",
