@@ -72,7 +72,7 @@ struct PSR {
                     exit(0);
             }
 
-
+            t = data & (1 << 5);
             f = data & (1 << 6);
             i = data & (1 << 7);
         }
@@ -112,6 +112,8 @@ struct CPU {
     bool cout; // Carry out
 
     bool isHalted, irqPending;
+
+    void setEntry(u32 addr);
 
     u8  (*read8 )(u32);
     u16 (*read16)(u32);

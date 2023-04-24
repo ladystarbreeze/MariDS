@@ -64,6 +64,14 @@ CPU::CPU(int cpuID, CP15 *cp15) {
 
 CPU::~CPU() {}
 
+void CPU::setEntry(u32 addr) {
+    std::printf("[ARM%d      ] Entry point = 0x%08X\n", cpuID, addr);
+
+    r[CPUReg::PC] = addr;
+
+    changeMode(CPUMode::SYS); // Only happens when fast booting, so we have to do this
+}
+
 /* Returns PC + 4 or a register without offset */
 u32 CPU::get(u32 idx) {
     assert(idx < 16);
@@ -156,10 +164,14 @@ void CPU::changeMode(CPUMode newMode) {
 }
 
 void CPU::halt() {
+    std::printf("[ARM%d      ] Halted\n", cpuID);
+    
     isHalted = true;
 }
 
 void CPU::unhalt() {
+    std::printf("[ARM%d      ] Unhalted\n", cpuID);
+
     isHalted = false;
 }
 
