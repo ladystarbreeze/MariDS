@@ -7,6 +7,7 @@
 
 #include <cstdio>
 
+#include "cartridge.hpp"
 #include "dma.hpp"
 #include "intc.hpp"
 #include "ipc.hpp"
@@ -26,6 +27,7 @@ enum class Memory7Base : u32 {
     DMA   = 0x040000B0,
     Timer = 0x04000100,
     IPC   = 0x04000180,
+    Cart  = 0x040001A0,
     INTC  = 0x04000208,
     SWRAM = 0x03000000,
     WRAM  = 0x03800000,
@@ -84,12 +86,14 @@ bool inRange(u64 addr, u64 base, u64 limit) {
     return (addr >= base) && (addr < (base + limit));
 }
 
-void init(const char *bios7Path, const char *bios9Path) {
+void init(const char *bios7Path, const char *bios9Path, const char *gamePath) {
     bios7 = loadBinary(bios7Path);
     bios9 = loadBinary(bios9Path);
 
     assert(bios7.size() == 0x4000); // 16KB
     assert(bios9.size() == 0x1000); // 4KB
+
+    cartridge::init(gamePath, bios7.data());
 
     mainMem.resize(static_cast<u32>(Memory9Limit::Main));
     swram.resize(static_cast<u32>(Memory7Limit::SWRAM));
@@ -99,6 +103,48 @@ void init(const char *bios7Path, const char *bios9Path) {
     postflg7 = postflg9 = 0;
 
     std::printf("[Bus       ] OK!\n");
+}
+
+// Sets both POSTFLG registers
+void setPOSTFLG(u8 data) {
+    std::printf("POSTFLG = %u\n", data);
+    
+    postflg7 = postflg9 = data;
+}
+
+void setWRAMCNT(u8 data) {
+    wramcnt = data & 3;
+
+    std::printf("WRAMCNT = %u\n", wramcnt);
+
+    switch (wramcnt) {
+        case 0: // Full allocation to ARM9 (ARM7 SWRAM is mapped to ARM7 WRAM)
+            swram7 = wram.data();
+            swram9 = swram.data();
+
+            swramLimit7 = 0xFFFF;
+            swramLimit9 = 0x7FFF;
+            break;
+        case 1: // Second half to ARM9, first half to ARM7
+            swram7 = swram.data();
+            swram9 = swram.data() + 0x4000;
+
+            swramLimit7 = swramLimit9 = 0x3FFF;
+            break;
+        case 2: // First half to ARM9, second half to ARM7
+            swram7 = swram.data() + 0x4000;
+            swram9 = swram.data();
+
+            swramLimit7 = swramLimit9 = 0x3FFF;
+            break;
+        case 3: // Full allocation to ARM7 (ARM9 SWRAM is unmapped)
+            swram7 = swram.data();
+            swram9 = NULL;
+
+            swramLimit7 = 0x7FFF;
+            swramLimit9 = 0;
+            break;
+    }
 }
 
 u8 read8ARM7(u32 addr) {
@@ -169,20 +215,18 @@ u32 read32ARM7(u32 addr) {
         std::memcpy(&data, &swram[addr & swramLimit7], sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
         std::memcpy(&data, &wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::read32ARM7(addr);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::read32ARM7(addr);
     } else {
         switch (addr) {
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
-                std::printf("[Bus:ARM7  ] Read32 @ ROMCTRL\n");
-                return 1 << 23;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
                 std::printf("[SPI       ] Read32 @ SPICNT\n"); // And SPIDATA??
                 //return (u32)spi::readSPICNT() | ((u32)spi::readSPIDATA() << 16);
                 return spi::readSPICNT();
             case 0x04100010:
-                std::printf("[Bus:ARM7  ] Read32 @ ROMDATA\n");
-                return -1;
+                return cartridge::readROMDATA();
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read32 @ 0x%08X\n", addr);
 
@@ -248,25 +292,14 @@ void write8ARM7(u32 addr, u8 data) {
         std::printf("[Bus:ARM7  ] Bad write8 @ BIOS (0x%08X) = 0x%02X\n", addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
         wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)] = data;
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::write8ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::write8ARM7(addr, data);
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x138:
                 std::printf("[Bus:ARM7  ] Write8 @ RTC = 0x%02X\n", data);
-                break;
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1A1:
-                std::printf("[Bus:ARM7  ] Write8 @ AUXSPICNT_HI = 0x%02X\n", data);
-                break;
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1A8:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1A9:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1AA:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1AB:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1AC:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1AD:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1AE:
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1AF:
-                std::printf("[Bus:ARM7  ] Write8 @ ROMCMD[%u] = 0x%02X\n", addr & 7, data);
                 break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C2:
                 std::printf("[SPI       ] Write8 @ SPIDATA = 0x%02X\n", data);
@@ -297,16 +330,12 @@ void write16ARM7(u32 addr, u16 data) {
         return dma::write16ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::Timer), 0x10)) {
         return timer::write16ARM7(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::write16ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
         return ipc::write16ARM7(addr, data);
     } else {
         switch (addr) {
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1B8:
-                std::printf("[Bus:ARM7  ] Write16 @ ROMSEED0_HI = 0x%04X\n", data);
-                break;
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1BA:
-                std::printf("[Bus:ARM7  ] Write16 @ ROMSEED1_HI = 0x%04X\n", data);
-                break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
                 std::printf("[SPI       ] Write16 @ SPICNT = 0x%04X\n", data);
                 return spi::writeSPICNT(data);
@@ -334,19 +363,12 @@ void write32ARM7(u32 addr, u32 data) {
         std::memcpy(&wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], &data, sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory7Base::Timer), 0x10)) {
         return timer::write32ARM7(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::write32ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::write32ARM7(addr, data);
     } else {
         switch (addr) {
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1A4:
-                std::printf("[Bus:ARM7  ] Write32 @ ROMCNT = 0x%08X\n", data);
-                break;
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1B0:
-                std::printf("[Bus:ARM7  ] Write32 @ ROMSEED0_LO = 0x%08X\n", data);
-                break;
-            case static_cast<u32>(Memory9Base::MMIO) + 0x1B4:
-                std::printf("[Bus:ARM7  ] Write32 @ ROMSEED1_LO = 0x%08X\n", data);
-                break;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
 
@@ -366,36 +388,7 @@ void write8ARM9(u32 addr, u8 data) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x247:
                 std::printf("[Bus:ARM9  ] Write8 @ WRAMCNT = 0x%02X\n", data);
 
-                wramcnt = data & 3;
-
-                switch (wramcnt) {
-                    case 0: // Full allocation to ARM9 (ARM7 SWRAM is mapped to ARM7 WRAM)
-                        swram7 = wram.data();
-                        swram9 = swram.data();
-
-                        swramLimit7 = 0xFFFF;
-                        swramLimit9 = 0x7FFF;
-                        break;
-                    case 1: // Second half to ARM9, first half to ARM7
-                        swram7 = swram.data();
-                        swram9 = swram.data() + 0x4000;
-
-                        swramLimit7 = swramLimit9 = 0x3FFF;
-                        break;
-                    case 2: // First half to ARM9, second half to ARM7
-                        swram7 = swram.data() + 0x4000;
-                        swram9 = swram.data();
-
-                        swramLimit7 = swramLimit9 = 0x3FFF;
-                        break;
-                    case 3: // Full allocation to ARM7 (ARM9 SWRAM is unmapped)
-                        swram7 = swram.data();
-                        swram9 = NULL;
-
-                        swramLimit7 = 0x7FFF;
-                        swramLimit9 = 0;
-                        break;
-                }
+                setWRAMCNT(data & 3);
                 break;
             default:
                 std::printf("[Bus:ARM9  ] Unhandled write8 @ 0x%08X = 0x%02X\n", addr, data);

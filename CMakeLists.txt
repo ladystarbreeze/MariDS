@@ -10,6 +10,7 @@ set(SOURCES
     src/main.cpp
     src/common/file.cpp
     src/core/bus.cpp
+    src/core/cartridge.cpp
     src/core/dma.cpp
     src/core/firmware.cpp
     src/core/intc.cpp
@@ -26,6 +27,7 @@ set(HEADERS
     src/common/file.hpp
     src/common/types.hpp
     src/core/bus.hpp
+    src/core/cartridge.hpp
     src/core/dma.hpp
     src/core/firmware.hpp
     src/core/intc.hpp

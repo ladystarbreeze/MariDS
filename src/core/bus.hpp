@@ -9,7 +9,10 @@
 
 namespace nds::bus {
 
-void init(const char *bios7Path, const char *bios9Path);
+void init(const char *bios7Path, const char *bios9Path, const char *gamePath);
+
+void setPOSTFLG(u8 data);
+void setWRAMCNT(u8 data);
 
 u8  read8ARM7 (u32 addr);
 u16 read16ARM7(u32 addr);
