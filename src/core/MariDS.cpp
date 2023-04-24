@@ -28,7 +28,7 @@ bool inRange(u64 addr, u64 base, u64 limit) {
 }
 
 void init(const char *bios7Path, const char *bios9Path, const char *firmPath, const char *gamePath, bool doFastBoot) {
-    std::printf("[MariDS    ] BIOS7: \"%s\"\n[MariDS    ] BIOS9: \"%s\"\n[MariDS    ] Firmware: \"%s\"[MariDS    ] Game: \"%s\"\n", bios7Path, bios9Path, firmPath, gamePath);
+    std::printf("[MariDS    ] BIOS7: \"%s\"\n[MariDS    ] BIOS9: \"%s\"\n[MariDS    ] Firmware: \"%s\"\n[MariDS    ] Game: \"%s\"\n", bios7Path, bios9Path, firmPath, gamePath);
 
     if (doFastBoot) assert(gamePath); // No fast boot without a game!
 
@@ -106,8 +106,8 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
         if (!(arm9Offset & 0xFFF)) arm9Offset = (arm9Offset | 0xFFF) + 1; // Round up ARM9 binary offset
 
-        assert(inRange(arm9Entry, 0x02000000, 0x3BFE00));
-        assert(inRange(arm9Addr , 0x02000000, 0x3BFE00));
+        //assert(inRange(arm9Entry, 0x02000000, 0x3BFE00));
+        //assert(inRange(arm9Addr , 0x02000000, 0x3BFE00));
 
         arm9Size = std::max(arm9Size, (u32)0x3BFE00);
 
@@ -125,8 +125,8 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
         std::printf("ARM7 offset = 0x%08X, entry point = 0x%08X, address = 0x%08X, size = 0x%08X\n", arm7Offset, arm7Entry, arm7Addr, arm7Size);
 
-        assert(inRange(arm7Entry, 0x02000000, 0x3BFE00) || inRange(arm7Entry, 0x037F8000, 0xFE00));
-        assert(inRange(arm7Addr , 0x02000000, 0x3BFE00) || inRange(arm7Addr , 0x037F8000, 0xFE00));
+        //assert(inRange(arm7Entry, 0x02000000, 0x3BFE00) || inRange(arm7Entry, 0x037F8000, 0xFE00));
+        //assert(inRange(arm7Addr , 0x02000000, 0x3BFE00) || inRange(arm7Addr , 0x037F8000, 0xFE00));
 
         arm7Size = (arm7Addr >= 0x037F8000) ? std::max(arm7Size, (u32)0xFE00) : std::max(arm7Size, (u32)0x3BFE00);
 
