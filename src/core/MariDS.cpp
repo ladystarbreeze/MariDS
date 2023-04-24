@@ -98,7 +98,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
         std::printf("ARM9 offset = 0x%08X, entry point = 0x%08X, address = 0x%08X, size = 0x%08X\n", arm9Offset, arm9Entry, arm9Addr, arm9Size);
 
         // Check for secure area
-        if (arm9Offset < 0x8000) {
+        if ((arm9Offset >= 0x4000) && (arm9Offset < 0x8000)) {
             std::printf("[MariDS    ] Unhandled Secure Area\n");
 
             exit(0);
@@ -139,7 +139,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
         // Copy ARM7 binary
         for (u32 i = 0; i < arm7Size; i++) {
-            bus::write8ARM9(arm7Addr + i, arm7Binary[i]);
+            bus::write8ARM7(arm7Addr + i, arm7Binary[i]);
         }
 
         // Set CPU entry points
