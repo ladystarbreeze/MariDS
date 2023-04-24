@@ -44,7 +44,7 @@ constexpr const char *shiftNames[] = {
 };
 
 constexpr const char *thumbLoadNames[] = {
-    "STR", "N/A", "N/A", "N/A", "LDR", "LDRH", "LDRB",
+    "STR", "N/A", "N/A", "N/A", "LDR", "LDRH", "LDRB", "LDRSH",
 };
 
 /* Condition codes */
@@ -77,10 +77,11 @@ enum class THUMBDPOpcode {
 
 /* THUMB loadstores */
 enum class THUMBLoadOpcode {
-    STR  = 0,
-    LDR  = 4,
-    LDRH = 5,
-    LDRB = 6,
+    STR   = 0,
+    LDR   = 4,
+    LDRH  = 5,
+    LDRB  = 6,
+    LDRSH = 7,
 };
 
 enum class ShiftType {
@@ -430,11 +431,11 @@ void aDataProcessing(CPU *cpu, u32 instr) {
     const auto rs = (instr >>  8) & 0xF;
     const auto rm = (instr >>  0) & 0xF;
 
-    assert(rd != CPUReg::PC);
-
     const auto opcode = (DPOpcode)((instr >> 21) & 0xF);
 
-    bool isS = instr & (1 << 20);
+    const bool isS = instr & (1 << 20);
+
+    auto S = isS && (rd != CPUReg::PC);
 
     const auto op1 = cpu->get(rn);
 
@@ -472,7 +473,7 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             {
                 const auto res = op1 & op2;
 
-                if (isS) setBitFlags(cpu, res);
+                if (S) setBitFlags(cpu, res);
 
                 cpu->r[rd] = res;
             }
@@ -481,7 +482,7 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             {
                 const auto res = op1 - op2;
 
-                if (isS) setSubFlags(cpu, op1, op2, res);
+                if (S) setSubFlags(cpu, op1, op2, res);
 
                 cpu->r[rd] = res;
             }
@@ -490,28 +491,28 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             {
                 const auto res = op1 + op2;
 
-                if (isS) setAddFlags(cpu, op1, op2, res);
+                if (S) setAddFlags(cpu, op1, op2, res);
 
                 cpu->r[rd] = res;
             }
             break;
         case DPOpcode::TST:
-            assert(isS); // Safeguard
+            assert(isS && (rd != CPUReg::PC)); // Safeguard
 
             setBitFlags(cpu, op1 & op2);
             break;
         case DPOpcode::TEQ:
-            assert(isS); // Safeguard
+            assert(isS && (rd != CPUReg::PC)); // Safeguard
 
             setBitFlags(cpu, op1 ^ op2);
             break;
         case DPOpcode::CMP:
-            assert(isS); // Safeguard
+            assert(isS && (rd != CPUReg::PC)); // Safeguard
 
             setSubFlags(cpu, op1, op2, op1 - op2);
             break;
         case DPOpcode::MOV:
-            if (isS) setBitFlags(cpu, op2);
+            if (S) setBitFlags(cpu, op2);
 
             cpu->r[rd] = op2;
             break;
@@ -519,7 +520,7 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             {
                 const auto res = op1 & ~op2;
 
-                if (isS) setBitFlags(cpu, res);
+                if (S) setBitFlags(cpu, res);
 
                 cpu->r[rd] = res;
             }
@@ -528,6 +529,20 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             std::printf("[ARM%d      ] Unhandled Data Processing opcode %s\n", cpu->cpuID, dpNames[static_cast<int>(opcode)]);
 
             exit(0);
+    }
+
+    if (isS && (rd == CPUReg::PC)) { // Reload CPSR
+        assert(cpu->cspsr);
+
+        const auto spsr = cpu->cspsr->get();
+
+        cpu->cpsr.set(0xE, spsr);
+
+        cpu->cpsr.t = spsr & (1 << 5);
+        cpu->cpsr.f = spsr & (1 << 6);
+        cpu->cpsr.i = spsr & (1 << 7);
+
+        cpu->changeMode((CPUMode)(spsr & 0xF));
     }
 
     if (doDisasm) {
@@ -1426,6 +1441,11 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
         case THUMBLoadOpcode::LDRB:
             cpu->r[rd] = cpu->read8(addr);
             break;
+        case THUMBLoadOpcode::LDRSH:
+            assert(!(addr & 1));
+
+            cpu->r[rd] = (i16)cpu->read16(addr);
+            break;
         default:
             std::printf("[ARM%d:T    ] Unhandled register offset %s\n", cpu->cpuID, thumbLoadNames[static_cast<int>(opcode)]);
 
@@ -1819,10 +1839,11 @@ void init() {
 
     for (int i = 0x140; i < 0x180; i++) {
         switch ((i >> 3) & 7) {
-            case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR >; break;
-            case 4: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDR >; break;
-            case 5: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRH>; break;
-            case 6: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRB>; break;
+            case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR  >; break;
+            case 4: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDR  >; break;
+            case 5: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRH >; break;
+            case 6: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRB >; break;
+            case 7: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRSH>; break;
         }
     }
 
@@ -1891,11 +1912,11 @@ void init() {
 }
 
 void run(CPU *cpu, i64 runCycles) {
-    if (cpu->isHalted) return;
-
-    if (cpu->r[CPUReg::PC] == 0x18) doDisasm = true;
-
     for (auto c = runCycles; c > 0; c--) {
+        if (cpu->isHalted) return;
+
+        //if (cpu->r[CPUReg::PC] == 0x18) doDisasm = true;
+
         (cpu->cpsr.t) ? decodeTHUMB(cpu) : decodeARM(cpu);
 
         assert(cpu->r[CPUReg::PC]);
