@@ -11,7 +11,8 @@
 namespace nds::ipc {
 
 enum class IPCReg {
-    IPCSYNC = 0x04000180,
+    IPCSYNC    = 0x04000180,
+    IPCFIFOCNT = 0x04000184,
 };
 
 struct IPCSYNC {
@@ -20,7 +21,16 @@ struct IPCSYNC {
     bool irqen; // Enable IRQ
 };
 
+struct IPCFIFOCNT {
+    bool sirqen; // SEND IRQ enable
+    bool rirqen; // RECV IRQ enable
+    bool error;
+    bool fifoen;
+};
+
 IPCSYNC ipcsync[2];
+
+IPCFIFOCNT ipcfifocnt[2];
 
 u16 read16ARM7(u32 addr) {
     u16 data;
@@ -109,6 +119,25 @@ void write16ARM9(u32 addr, u16 data) {
                 sync.irqen = data & (1 << 14);
 
                 assert(!otherSync.irqen);
+            }
+            break;
+        case static_cast<u32>(IPCReg::IPCFIFOCNT):
+            {
+                std::printf("[IPC:ARM9  ] Write16 @ IPCFIFOCNT = 0x%04X\n", data);
+
+                auto &cnt = ipcfifocnt[1];
+
+                cnt.sirqen = data & (1 <<  2);
+                cnt.rirqen = data & (1 << 10);
+                cnt.fifoen = data & (1 << 15);
+
+                if (data & (1 << 3)) { // Clear SEND
+
+                }
+
+                if (data & (1 << 14)) { // Clear SEND
+                    cnt.error = false;
+                }
             }
             break;
         default:
