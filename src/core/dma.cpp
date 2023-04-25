@@ -177,6 +177,46 @@ u16 read16ARM7(u32 addr) {
     return data;
 }
 
+u16 read16ARM9(u32 addr) {
+    u16 data;
+
+    const auto chnID = (addr >= static_cast<u32>(DMAReg::DMAFILL)) ? (addr >> 2) & 3 : getChnID(addr);
+
+    auto &chn = channels9[chnID];
+
+    if (addr >= static_cast<u32>(DMAReg::DMAFILL)) {
+        std::printf("[DMA:ARM9  ] Unhandled read16 @ DMA%dFILL\n", chnID);
+
+        exit(0);
+    } else {
+        switch (addr - 12 * chnID) {
+            case static_cast<u32>(DMAReg::DMACNT_H):
+                {
+                    std::printf("[DMA:ARM9  ] Read16 @ DMA%dCNT_H\n", chnID);
+
+                    auto &cnt = chn.dmacnt;
+
+                    data = chn.ctr[1] >> 16;
+
+                    data |= (u32)cnt.dstcnt << 5;
+                    data |= (u32)cnt.srccnt << 7;
+                    data |= (u32)cnt.repeat << 9;
+                    data |= (u32)cnt.isWord << 10;
+                    data |= (u32)cnt.sync   << 11;
+                    data |= (u32)cnt.irqen  << 14;
+                    data |= (u32)cnt.dmaen  << 15;
+                }
+                break;
+            default:
+                std::printf("[DMA:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
+
+                exit(0);
+        }
+    }
+
+    return data;
+}
+
 u32 read32ARM9(u32 addr) {
     u32 data;
 
@@ -190,6 +230,9 @@ u32 read32ARM9(u32 addr) {
         return chn.fill;
     } else {
         switch (addr - 12 * chnID) {
+            case static_cast<u32>(DMAReg::DMASAD):
+                std::printf("[DMA:ARM9  ] Read32 @ DMA%dSAD\n", chnID);
+                return chn.sad[1];
             case static_cast<u32>(DMAReg::DMACNT):
                 {
                     std::printf("[DMA:ARM9  ] Read32 @ DMA%dCNT\n", chnID);
@@ -268,6 +311,27 @@ void write16ARM9(u32 addr, u16 data) {
                 std::printf("[DMA:ARM9  ] Write16 @ DMA%dCNT_L = 0x%04X\n", chnID, data);
                 
                 chn.ctr[1] = (chn.ctr[1] & 0xFFFF0000) | (u32)data;
+                break;
+            case static_cast<u32>(DMAReg::DMACNT_H):
+                {
+                    std::printf("[DMA:ARM9  ] Write16 @ DMA%dCNT_H = 0x%04X\n", chnID, data);
+
+                    auto &cnt = chn.dmacnt;
+
+                    const auto dmaen = cnt.dmaen;
+
+                    chn.ctr[1] = (((u32)data << 16) & 0x1F0000) | (chn.ctr[1] & 0xFFFF);
+
+                    cnt.dstcnt = (data >> 5) & 3;
+                    cnt.srccnt = (data >> 7) & 3;
+                    cnt.repeat = data & (1 << 9);
+                    cnt.isWord = data & (1 << 10);
+                    cnt.sync   = (data >> 11) & 7;
+                    cnt.irqen  = data & (1 << 14);
+                    cnt.dmaen  = data & (1 << 15);
+
+                    if (!dmaen && cnt.dmaen) doDMA9(chnID);
+                }
                 break;
             default:
                 std::printf("[DMA:ARM9  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
