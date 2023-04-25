@@ -144,6 +144,14 @@ void setBitFlags(CPU *cpu, u32 c) {
     // V is left untouched
 }
 
+/* Sets UMULL/SMULL/UMLAL/SMLAL flags */
+void setMULLFlags(CPU *cpu, u64 c) {
+    cpu->cpsr.n = c & (1ull << 63);
+    cpu->cpsr.z = !c;
+    // C is left untouched
+    // V is left untouched
+}
+
 /* Sets ADC flags */
 void setADCFlags(CPU *cpu, u32 a, u32 b, u64 c) {
     const auto cin = (u64)cpu->cpsr.c;
@@ -163,6 +171,19 @@ void setAddFlags(CPU *cpu, u32 a, u32 b, u32 c) {
     cpu->cpsr.v = !((a ^ b) & (1 << 31)) && ((a ^ c) & (1 << 31)); // Signed overflow if a & b have the same sign sign, and a & c have different signs
 }
 
+/* Sets SBC/RSC flags */
+void setSBCFlags(CPU *cpu, u32 a, u32 b, u32 c) {
+    const auto cin = (u64)!cpu->cpsr.c;
+
+    const auto tmp1 = a    - b;
+    const auto tmp2 = tmp1 - cin;
+
+    cpu->cpsr.n = c & (1 << 31);
+    cpu->cpsr.z = !c;
+    cpu->cpsr.c = (a >= b) && (tmp1 >= cin);
+    cpu->cpsr.v = ((((a ^ b) & ~(tmp1 ^ b)) ^ (tmp1 & ~tmp2)) >> 31) & 1; // ??
+}
+
 /* Sets SUB/RSB/CMP flags */
 void setSubFlags(CPU *cpu, u32 a, u32 b, u32 c) {
     cpu->cpsr.n = c & (1 << 31);
@@ -177,7 +198,7 @@ void setSubFlags(CPU *cpu, u32 a, u32 b, u32 c) {
 template<bool isImm>
 u32 doASR(CPU *cpu, u32 data, u32 amt) {
     if (!amt) {
-        if constexpr (isImm) { // Don't set any flags
+        if constexpr (!isImm) { // Don't set any flags
             cpu->cout = cpu->cpsr.c;
         
             return data;
@@ -191,7 +212,7 @@ u32 doASR(CPU *cpu, u32 data, u32 amt) {
 
         cpu->cout = sign;
 
-        return -1 * sign;
+        return 0 - sign;
     }
 
     cpu->cout = (data >> (amt - 1)) & 1;
@@ -222,7 +243,7 @@ u32 doLSL(CPU *cpu, u32 data, u32 amt) {
 template<bool isImm>
 u32 doLSR(CPU *cpu, u32 data, u32 amt) {
     if (!amt) {
-        if constexpr (isImm) { // Don't set any flags
+        if constexpr (!isImm) { // Don't set any flags
             cpu->cout = cpu->cpsr.c;
         
             return data;
@@ -431,12 +452,6 @@ void aCoprocessorRegisterTransfer(CPU *cpu, u32 instr) {
 /* ARM state data processing */
 template<bool isImm, bool isImmShift, bool isRegShift>
 void aDataProcessing(CPU *cpu, u32 instr) {
-    if constexpr (isRegShift) {
-        std::printf("[ARM%d      ] Unhandled data processing instruction 0x%08X\n", cpu->cpuID, instr);
-
-        exit(0);
-    }
-
     // Get operands and opcode
     const auto rd = (instr >> 12) & 0xF;
     const auto rn = (instr >> 16) & 0xF;
@@ -449,7 +464,7 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
     auto S = isS && (rd != CPUReg::PC);
 
-    const auto op1 = cpu->get(rn);
+    auto op1 = cpu->get(rn);
 
     // Decode op2
     u32 op2;
@@ -469,14 +484,18 @@ void aDataProcessing(CPU *cpu, u32 instr) {
         if constexpr (isImmShift) {
             amt = (instr >> 7) & 0x1F;
         } else {
-            assert(false);
+            amt = cpu->get(rs);
+
+            // Shifts by register-specified amounts take an extra cycle, causes PC as operand to be 12 bytes ahead
+            if (rn == CPUReg::PC) op1 += 4;
+            if (rm == CPUReg::PC) op2 += 4;
         }
 
         switch (stype) {
-            case ShiftType::LSL: op2 = shift<ShiftType::LSL, isImm>(cpu, op2, amt); break;
-            case ShiftType::LSR: op2 = shift<ShiftType::LSR, isImm>(cpu, op2, amt); break;
-            case ShiftType::ASR: op2 = shift<ShiftType::ASR, isImm>(cpu, op2, amt); break;
-            case ShiftType::ROR: op2 = shift<ShiftType::ROR, isImm>(cpu, op2, amt); break;
+            case ShiftType::LSL: op2 = shift<ShiftType::LSL, isImmShift>(cpu, op2, amt); break;
+            case ShiftType::LSR: op2 = shift<ShiftType::LSR, isImmShift>(cpu, op2, amt); break;
+            case ShiftType::ASR: op2 = shift<ShiftType::ASR, isImmShift>(cpu, op2, amt); break;
+            case ShiftType::ROR: op2 = shift<ShiftType::ROR, isImmShift>(cpu, op2, amt); break;
         }
     }
 
@@ -531,6 +550,24 @@ void aDataProcessing(CPU *cpu, u32 instr) {
                 const auto res = (u64)op1 + (u64)op2 + (u64)cpu->cpsr.c;
 
                 setADCFlags(cpu, op1, op2, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
+        case DPOpcode::SBC:
+            {
+                const auto res = op1 - op2 - (u32)!cpu->cpsr.c;
+
+                if (S) setSBCFlags(cpu, op1, op2, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
+        case DPOpcode::RSC:
+            {
+                const auto res = op2 - op1 - (u32)!cpu->cpsr.c;
+
+                if (S) setSBCFlags(cpu, op2, op1, res);
 
                 cpu->r[rd] = res;
             }
@@ -609,30 +646,40 @@ void aDataProcessing(CPU *cpu, u32 instr) {
         if constexpr (isImm) {
             switch (opcode) {
                 case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], op2, regNames[rn], cpu->get(rn));
+                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], op2, regNames[rn], op1);
                     break;
                 case DPOpcode::MOV: case DPOpcode::MVN:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], op2, regNames[rd], cpu->r[rd]);
+                    std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, (isS) ? "S" : "", regNames[rd], op2, regNames[rd], cpu->r[rd]);
                     break;
                 default:
-                    std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rn], op2, regNames[rd], cpu->r[rd]);
+                    std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, %s, 0x%08X; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, (isS) ? "S" : "", regNames[rd], regNames[rn], op2, regNames[rd], cpu->r[rd]);
                     break;
             }
         } else {
             if constexpr (isImmShift) {
                 switch (opcode) {
                     case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
-                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rn], cpu->get(rn));
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rn], op1, regNames[rm], op2);
                         break;
                     case DPOpcode::MOV: case DPOpcode::MVN:
-                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
+                        std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, (isS) ? "S" : "", regNames[rd], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
                         break;
                     default:
-                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rd], regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
+                        std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, %s, %s %s %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, (isS) ? "S" : "", regNames[rd], regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], amt, regNames[rd], cpu->r[rd]);
                         break;
                 }
             } else {
-                assert(false);
+                switch (opcode) {
+                    case DPOpcode::TST: case DPOpcode::TEQ: case DPOpcode::CMP: case DPOpcode::CMN:
+                        std::printf("[ARM%d      ] [0x%08X] %s%s %s, %s %s %s; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], regNames[rs], regNames[rn], op1, regNames[rm], op2);
+                        break;
+                    case DPOpcode::MOV: case DPOpcode::MVN:
+                        std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, %s %s %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, (isS) ? "S" : "", regNames[rd], regNames[rm], shiftNames[static_cast<int>(stype)], regNames[rs], regNames[rd], cpu->r[rd]);
+                        break;
+                    default:
+                        std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, %s, %s %s %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, dpNames[static_cast<int>(opcode)], cond, (isS) ? "S" : "", regNames[rd], regNames[rn], regNames[rm], shiftNames[static_cast<int>(stype)], regNames[rs], regNames[rd], cpu->r[rd]);
+                        break;
+                }
             }
         }
     }
@@ -914,6 +961,71 @@ void aMSR(CPU *cpu, u32 instr) {
     }
 }
 
+/* ARM state MUL/MLA */
+template<bool isA, bool isS>
+void aMultiply(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rd = (instr >> 16) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+    const auto rn = (instr >> 12) & 0xF;
+    const auto rs = (instr >>  8) & 0xF;
+
+    assert((rd != CPUReg::PC) && (rm != CPUReg::PC) && (rn != CPUReg::PC) && (rs != CPUReg::PC));
+
+    cpu->r[rd] = cpu->r[rm] * cpu->r[rs];
+
+    if constexpr (isA) {
+        cpu->r[rd] += cpu->r[rn];
+    }
+
+    if constexpr (isS) {
+        cpu->cout = cpu->cpsr.c; // ARMv5 keeps C untouched
+
+        setBitFlags(cpu, cpu->r[rd]);
+    }
+
+    if (doDisasm) {
+        if constexpr (isA) {
+            std::printf("[ARM%d      ] [0x%08X] MLA%s %s, %s, %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isS) ? "S" : "", regNames[rd], regNames[rm], regNames[rs], regNames[rn], regNames[rd], cpu->r[rd]);
+        } else {
+            std::printf("[ARM%d      ] [0x%08X] MUL%s %s, %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isS) ? "S" : "", regNames[rd], regNames[rm], regNames[rs], regNames[rd], cpu->r[rd]);
+        }
+    }
+}
+
+/* ARM state UMULL/UMLAL/SMULL/SMLAL */
+template<bool isSigned, bool isA, bool isS>
+void aMultiplyLong(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rdhi = (instr >> 16) & 0xF;
+    const auto rdlo = (instr >> 12) & 0xF;
+
+    const auto rm = (instr >> 0) & 0xF;
+    const auto rs = (instr >> 8) & 0xF;
+
+    assert((rdhi != CPUReg::PC) && (rdlo != CPUReg::PC) && (rm != CPUReg::PC) && (rs != CPUReg::PC));
+
+    assert(rdhi != rdlo);
+
+    auto acc = ((u64)cpu->r[rdhi] << 32) | (u64)cpu->r[rdlo];
+
+    u64 res;
+
+    if constexpr (isSigned) {
+        res = (i64)(i32)cpu->r[rm] * (i64)(i32)cpu->r[rs];
+    } else {
+        res = (u64)cpu->r[rm] * (u64)cpu->r[rs];
+    }
+
+    if constexpr (isA) res += acc;
+    if constexpr (isS) setMULLFlags(cpu, res);
+
+    cpu->r[rdlo] = res;
+    cpu->r[rdhi] = res >> 32;
+
+    if (doDisasm) std::printf("[ARM%d      ] [0x%08X] %s%s%s %s, %s, %s, %s; %s = 0x%08X, %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isSigned) ? "S" : "U", (isA) ? "MLAL" : "MULL", (isS) ? "S" : "", regNames[rdlo], regNames[rdhi], regNames[rm], regNames[rs], regNames[rdlo], cpu->r[rdlo], regNames[rdhi], cpu->r[rdhi]);
+}
+
 /* ARM state Single Data Transfer */
 template<bool isP, bool isU, bool isB, bool isW, bool isL, bool isImm>
 void aSingleDataTransfer(CPU *cpu, u32 instr) {
@@ -1026,9 +1138,7 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
 
 /* ARM state SWI */
 void aSWI(CPU *cpu, u32 instr) {
-    if (doDisasm) {
-        std::printf("[ARM%d      ] [0x%08X] SWI 0x%06X\n", cpu->cpuID, cpu->cpc, instr & 0xFFFFFF);
-    }
+    if (doDisasm) std::printf("[ARM%d      ] [0x%08X] SWI 0x%06X\n", cpu->cpuID, cpu->cpc, instr & 0xFFFFFF);
 
     cpu->raiseSVCException();
 }
@@ -1725,6 +1835,20 @@ void init() {
             instrTableARM[i | 0x200] = &aDataProcessing<1, 0, 0>;
         }
     }
+
+    instrTableARM[0x009] = &aMultiply<0, 0>;
+    instrTableARM[0x019] = &aMultiply<0, 1>;
+    instrTableARM[0x029] = &aMultiply<1, 0>;
+    instrTableARM[0x039] = &aMultiply<1, 1>;
+
+    instrTableARM[0x089] = &aMultiplyLong<0, 0, 0>;
+    instrTableARM[0x099] = &aMultiplyLong<0, 0, 1>;
+    instrTableARM[0x0A9] = &aMultiplyLong<0, 1, 0>;
+    instrTableARM[0x0B9] = &aMultiplyLong<0, 1, 1>;
+    instrTableARM[0x0C9] = &aMultiplyLong<1, 0, 0>;
+    instrTableARM[0x0D9] = &aMultiplyLong<1, 0, 1>;
+    instrTableARM[0x0E9] = &aMultiplyLong<1, 1, 0>;
+    instrTableARM[0x0F9] = &aMultiplyLong<1, 1, 1>;
 
     instrTableARM[0x00B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 0, 0>;
     instrTableARM[0x02B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 0, 1>;
