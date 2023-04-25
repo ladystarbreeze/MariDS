@@ -275,15 +275,15 @@ u32 doROR(CPU *cpu, u32 data, u32 amt) {
 
         amt &= 0x1F;
 
-        data = (data >> (amt - 1)) | (data << (31 - amt));
+        data = std::__rotr(data, amt - 1);
 
         cpu->cout = data & 1;
 
-        return (data >> 1) || (data << 31);
+        return (data >> 1) | (data << 31);
     } else {
         cpu->cout = data & 1;
 
-        return (data >> 1) | (cpu->cpsr.c << 31);
+        return (data >> 1) | ((u32)cpu->cpsr.c << 31);
     }
 }
 
@@ -1405,6 +1405,14 @@ void tDataProcessing(CPU *cpu, u16 instr) {
                 cpu->r[rd] = res;
             }
             break;
+        case THUMBDPOpcode::ROR:
+            cpu->r[rd] = shift<ShiftType::ROR, false>(cpu, cpu->r[rd], cpu->r[rm]);
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::TST:
+            setBitFlags(cpu, cpu->r[rd] & cpu->r[rm]);
+            break;
         case THUMBDPOpcode::NEG:
             cpu->r[rd] = 0 - cpu->r[rm];
 
@@ -1856,9 +1864,9 @@ void decodeUnconditional(CPU *cpu, u32 instr) {
 }
 
 void decodeARM(CPU *cpu) {
-    cpu->cpc = cpu->r[CPUReg::PC];
+    cpu->r[CPUReg::PC] &= ~3;
 
-    assert(!(cpu->cpc & 3));
+    cpu->cpc = cpu->r[CPUReg::PC];
 
     // Fetch instruction, increment program counter
     const auto instr = cpu->read32(cpu->cpc);
@@ -1879,9 +1887,9 @@ void decodeARM(CPU *cpu) {
 }
 
 void decodeTHUMB(CPU *cpu) {
-    cpu->cpc = cpu->r[CPUReg::PC];
+    cpu->r[CPUReg::PC] &= ~1;
 
-    assert(!(cpu->cpc & 1));
+    cpu->cpc = cpu->r[CPUReg::PC];
 
     // Fetch instruction, increment program counter
     const auto instr = cpu->read16(cpu->cpc);
