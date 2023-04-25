@@ -17,6 +17,8 @@ enum CP15Reg {
     CDPR     = 0x0200,
     CIPR     = 0x0201,
     CWB      = 0x0300,
+    APDPR    = 0x0500,
+    APIPR    = 0x0501,
     EAPDPR   = 0x0502,
     EAPIPR   = 0x0503,
     WFI      = 0x0704,
@@ -33,10 +35,45 @@ u32 CP15::get(u32 idx) {
             std::printf("[ARM9:CP15 ] Read @ Control\n");
 
             return control;
+        case CP15Reg::CDPR:
+            std::printf("[ARM9:CP15 ] Read @ Cacheability (data protection region)\n");
+            return 0;
+        case CP15Reg::CIPR:
+            std::printf("[ARM9:CP15 ] Read @ Cacheability (instruction protection region)\n");
+            return 0;
+        case CP15Reg::CWB:
+            std::printf("[ARM9:CP15 ] Read @ Cache write bufferability\n");
+            return 0;
+        case CP15Reg::APDPR:
+            std::printf("[ARM9:CP15 ] Read @ Access permission (data protection region)\n");
+            return 0;
+        case CP15Reg::APIPR:
+            std::printf("[ARM9:CP15 ] Read @ Access permission (instruction protection region)\n");
+            return 0;
+        case CP15Reg::EAPDPR:
+            std::printf("[ARM9:CP15 ] Read @ Extended access permission (data protection region)\n");
+            return 0;
+        case CP15Reg::EAPIPR:
+            std::printf("[ARM9:CP15 ] Read @ Extended access permission (instruction protection region)\n");
+            return 0;
+        case 0x0600:
+        case 0x0610:
+        case 0x0620:
+        case 0x0630:
+        case 0x0640:
+        case 0x0650:
+        case 0x0660:
+        case 0x0670:
+            std::printf("[ARM9:CP15 ] Read @ PU data region %u\n", (idx >> 4) & 0xF);
+            return 0;
         case CP15Reg::DTCMSize:
             std::printf("[ARM9:CP15 ] Read @ DTCM size\n");
 
             return dtcmSize;
+        case CP15Reg::ITCMSize:
+            std::printf("[ARM9:CP15 ] Read @ ITCM size\n");
+
+            return itcmSize;
         default:
             std::printf("[ARM9:CP15 ] Unhandled read @ 0x%04X\n", idx);
 
