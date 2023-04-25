@@ -23,8 +23,11 @@ enum CP15Reg {
     EAPIPR   = 0x0503,
     WFI      = 0x0704,
     IIC      = 0x0750,
+    IICL     = 0x0751,
     IDC      = 0x0760,
+    IDCL     = 0x0761,
     DWB      = 0x07A4,
+    CIDC     = 0x07E1,
     DTCMSize = 0x0910,
     ITCMSize = 0x0911,
 };
@@ -121,11 +124,21 @@ void CP15::set(u32 idx, u32 data) {
         case CP15Reg::IIC:
             std::printf("[ARM9:CP15 ] Invalidate instruction cache\n");
             break;
+        case CP15Reg::IICL:
+            std::printf("[ARM9:CP15 ] Invalidate instruction cache line 0x%08X\n", data);
+            break;
         case CP15Reg::IDC:
             std::printf("[ARM9:CP15 ] Invalidate data cache\n");
             break;
+        case CP15Reg::IDCL:
+            std::printf("[ARM9:CP15 ] Invalidate data cache line 0x%08X\n", data);
+            break;
         case CP15Reg::DWB:
             std::printf("[ARM9:CP15 ] Drain write buffer\n");
+            break;
+        case CP15Reg::CIDC:
+        case CP15Reg::CIDC + 1:
+            std::printf("[ARM9:CP15 ] Clean and invalidate data cache line 0x%08X\n", data);
             break;
         case CP15Reg::DTCMSize:
             std::printf("[ARM9:CP15 ] Write @ DTCM size = 0x%08X\n", data);
