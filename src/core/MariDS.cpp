@@ -138,14 +138,23 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
         std::printf("ARM9 offset = 0x%08X, entry point = 0x%08X, address = 0x%08X, size = 0x%08X\n", arm9Offset, arm9Entry, arm9Addr, arm9Size);
 
+        u32 arm9Start = 0;
+
         // Check for secure area
         if ((arm9Offset >= 0x4000) && (arm9Offset < 0x8000)) {
-            std::printf("[MariDS    ] Unhandled Secure Area\n");
+            u8 secureArea[0x800];
 
-            exit(0);
+            cart->seekg(arm9Offset, std::ios::beg);
+            cart->read((char *)secureArea, 0x800);
+
+            for (int i = 0; i < 0x800; i++) {
+                bus::write8ARM9(arm9Addr + i, secureArea[i]);
+            }
+
+            arm9Start += 0x800;
         }
 
-        if (!(arm9Offset & 0xFFF)) arm9Offset = (arm9Offset | 0xFFF) + 1; // Round up ARM9 binary offset
+        if (arm9Offset & 0xFFF) arm9Offset = (arm9Offset | 0xFFF) + 1; // Round up ARM9 binary offset
 
         //assert(inRange(arm9Entry, 0x02000000, 0x3BFE00));
         //assert(inRange(arm9Addr , 0x02000000, 0x3BFE00));
@@ -160,7 +169,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
         cart->read((char *)arm9Binary.data(), arm9Size);
 
         // Copy ARM9 binary
-        for (u32 i = 0; i < arm9Size; i++) {
+        for (u32 i = arm9Start; i < arm9Size; i++) {
             bus::write8ARM9(arm9Addr + i, arm9Binary[i]);
         }
 
