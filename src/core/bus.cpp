@@ -49,6 +49,7 @@ enum class Memory9Base : u32 {
     ITCM0 = 0x00000000,
     DTCM0 = 0x00800000,
     ITCM1 = 0x01000000,
+    ITCM2 = 0x01FF8000,
     Main  = 0x02000000,
     MMIO  = 0x04000000,
     DISPA = 0x04000000,
@@ -60,6 +61,7 @@ enum class Memory9Base : u32 {
     Pal   = 0x05000000,
     LCDC  = 0x06800000,
     OAM   = 0x07000000,
+    GBA0  = 0x08000000,
     DTCM1 = 0x0B000000,
     BIOS  = 0xFFFF0000,
 };
@@ -71,6 +73,7 @@ enum class Memory9Limit : u32 {
     Main = 0x00400000,
     Pal  = 0x00000800,
     LCDC = 0x000A4000,
+    GBA0 = 0x02000000,
 };
 
 // NDS ARM7 memory
@@ -212,6 +215,8 @@ u16 read16ARM7(u32 addr) {
         return dma::read16ARM7(addr);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
         return ipc::read16ARM7(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
+        return intc::read16ARM7(addr);
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 4:
@@ -220,6 +225,9 @@ u16 read16ARM7(u32 addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x130:
                 //std::printf("[Bus:ARM7  ] Read16 @ KEYINPUT\n");
                 return getKEYINPUT();
+            case static_cast<u32>(Memory9Base::MMIO) + 0x300:
+                std::printf("[Bus:ARM7  ] Read16 @ POSTFLG\n");
+                return postflg7;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read16 @ 0x%08X\n", addr);
 
@@ -266,6 +274,7 @@ u32 read32ARM7(u32 addr) {
 }
 
 u8 read8ARM9(u32 addr) {
+    if (addr == 8) return 0;
     if (inRange(addr, static_cast<u32>(Memory9Base::Main), 2 * static_cast<u32>(Memory9Limit::Main))) {
         return mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)];
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
@@ -288,7 +297,9 @@ u16 read16ARM9(u32 addr) {
     
     u16 data;
 
-    if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::ITCM0), static_cast<u32>(Memory9Limit::ITCM))) {
+        std::memcpy(&data, &itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], sizeof(u16));
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) {
         std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], sizeof(u16));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DISPA), 0x70)) {
         if (addr == (static_cast<u32>(Memory9Base::MMIO) + 4)) {
@@ -299,10 +310,16 @@ u16 read16ARM9(u32 addr) {
 
             return 0;
         }
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::DMA), 0x40)) {
+        return dma::read16ARM9(addr);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) { // Same memory base as ARM7
         return ipc::read16ARM9(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Math), 0x40)) {
         return math::read16(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
+        return intc::read16ARM9(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::GBA0), static_cast<u32>(Memory9Limit::GBA0))) {
+        return 0;
     } else if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
         std::memcpy(&data, &bios9[addr & 0xFFE], sizeof(u16));
     } else {
@@ -310,6 +327,12 @@ u16 read16ARM9(u32 addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x130:
                 //std::printf("[Bus:ARM9  ] Read16 @ KEYINPUT\n");
                 return getKEYINPUT();
+            case static_cast<u32>(Memory9Base::MMIO) + 0x204:
+                std::printf("[Bus:ARM9  ] Read16 @ EXMEMCNT\n");
+                return 0;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x300:
+                std::printf("[Bus:ARM9  ] Read16 @ POSTFLG\n");
+                return postflg9;
             default:
                 std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
 
@@ -325,9 +348,13 @@ u32 read32ARM9(u32 addr) {
     
     u32 data;
 
-    if (inRange(addr, static_cast<u32>(Memory9Base::DTCM0), static_cast<u32>(Memory9Limit::DTCM))) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::ITCM0), static_cast<u32>(Memory9Limit::ITCM))) {
+        std::memcpy(&data, &itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::DTCM0), static_cast<u32>(Memory9Limit::DTCM))) {
         std::memcpy(&data, &dtcm[addr & (static_cast<u32>(Memory9Limit::DTCM) - 1)], sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::ITCM1), static_cast<u32>(Memory9Limit::ITCM))) {
+        std::memcpy(&data, &itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::ITCM2), static_cast<u32>(Memory9Limit::ITCM))) {
         std::memcpy(&data, &itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) {
         std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], sizeof(u32));
@@ -508,7 +535,9 @@ void write8ARM9(u32 addr, u8 data) {
 void write16ARM9(u32 addr, u16 data) {
     assert(!(addr & 1));
 
-    if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::ITCM0), static_cast<u32>(Memory9Limit::ITCM))) {
+        std::memcpy(&itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], &data, sizeof(u16));
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) {
         std::memcpy(&mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], &data, sizeof(u16));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DISPA), 0x70)) {
         if (addr == (static_cast<u32>(Memory9Base::DISPA) + 4)) {
@@ -552,6 +581,8 @@ void write32ARM9(u32 addr, u32 data) {
     if (inRange(addr, static_cast<u32>(Memory9Base::DTCM0), static_cast<u32>(Memory9Limit::DTCM))) {
         std::memcpy(&dtcm[addr & (static_cast<u32>(Memory9Limit::DTCM) - 1)], &data, sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::ITCM1), static_cast<u32>(Memory9Limit::ITCM))) {
+        std::memcpy(&itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], &data, sizeof(u32));
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::ITCM2), static_cast<u32>(Memory9Limit::ITCM))) {
         std::memcpy(&itcm[addr & (static_cast<u32>(Memory9Limit::ITCM) - 1)], &data, sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) { // Same as ARM9 Main Mem
         std::memcpy(&mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], &data, sizeof(u32));
