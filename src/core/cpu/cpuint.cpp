@@ -313,6 +313,15 @@ u32 rotateImm(CPU *cpu, u32 imm, u32 amt) {
     return std::__rotr(imm, amt);
 }
 
+/* Rotates LDR data */
+u32 rotateRead32(u32 data, u32 addr) {
+    const auto amt = 8 * (addr & 3);
+
+    if (!amt) return data;
+
+    return std::__rotr(data, amt);
+}
+
 // Instruction handlers (ARM)
 
 /* Unhandled ARM state instruction */
@@ -730,6 +739,11 @@ void aExtraLoad(CPU *cpu, u32 instr) {
 
             cpu->r[rd] = cpu->read16(addr);
             break;
+        case ExtraLoadOpcode::LDRSB:
+            assert(rd != CPUReg::PC);
+
+            cpu->r[rd] = (i8)cpu->read8(addr);
+            break;
         default:
             std::printf("[ARM%d      ] Unhandled Extra Load opcode %s\n", cpu->cpuID, extraLoadNames[static_cast<int>(opcode)]);
 
@@ -761,7 +775,7 @@ void aExtraLoad(CPU *cpu, u32 instr) {
         const auto cond = condNames[instr >> 28];
 
         if constexpr (isI) {
-            if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
+            if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSH)) {
                 std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%02X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
             } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
                 std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
@@ -769,7 +783,7 @@ void aExtraLoad(CPU *cpu, u32 instr) {
                 assert(false); // TODO: LDRD/STRD
             }
         } else {
-            if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
+            if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSH)) {
                 std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s%s%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", regNames[rm], (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
             } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
                 std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s%s%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", regNames[rm], (isP) ? "]" : "", addr, regNames[rd], data);
@@ -783,7 +797,7 @@ void aExtraLoad(CPU *cpu, u32 instr) {
 /* ARM state LDM/STM */
 template<bool isP, bool isU, bool isS, bool isW, bool isL>
 void aLoadMultiple(CPU *cpu, u32 instr) {
-    assert(!isS);
+    assert(isL || !isS);
 
     // Get operands
     const auto rn = (instr >> 16) & 0xF;
@@ -809,7 +823,7 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
         if (reglist & (1 << rn)) {
             // ARM7 stores the old base only if Rn is the first register in reglist.
             // If not, it stores the NEW base. Handle this here
-            if ((cpu->cpuID == 7) && ((int)rn == std::__countr_zero(reglist))) {
+            if ((cpu->cpuID == 7) && ((int)rn != std::__countr_zero(reglist))) {
                 if constexpr (isU) {
                     cpu->r[rn] = addr + 4 * std::__popcount(reglist);
                 } else {
@@ -819,7 +833,17 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
 
             // ARM9 always stores the OLD base, so don't do anything here
         }
-    } 
+    }
+
+    CPUMode mode;
+
+    if constexpr (isL && isS) {
+        if (!(reglist & (1 << 15))) {
+            mode = cpu->cpsr.mode;
+
+            cpu->changeMode(CPUMode::USR); // User mode transfer
+        }
+    }
 
     for (auto rlist = reglist; rlist != 0; ) {
         // Get next register
@@ -829,20 +853,42 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
         if (P) addr += 4;
 
         if constexpr (isL) {
-            cpu->r[i] = cpu->read32(addr);
+            cpu->r[i] = cpu->read32(addr & ~3);
 
             if (doDisasm) std::printf("%s = [0x%08X] = 0x%08X\n", regNames[i], addr, cpu->r[i]);
 
-            if ((i == CPUReg::PC) && (cpu->cpuID == 9)) {
-                // Change processor state
-                cpu->cpsr.t = cpu->r[CPUReg::PC] & 1;
+            if (i == CPUReg::PC) {
+                if (cpu->cpuID == 9) {
+                    assert(!isS);
 
-                cpu->r[CPUReg::PC] &= ~1;
+                    // Change processor state
+                    cpu->cpsr.t = cpu->r[CPUReg::PC] & 1;
+
+                    cpu->r[CPUReg::PC] &= ~1;
+                }
+
+                if constexpr (isS) { // Reload CPSR
+                    assert(cpu->cspsr);
+
+                    const auto spsr = cpu->cspsr->get();
+
+                    cpu->cpsr.set(0xE, spsr);
+
+                    cpu->cpsr.t = spsr & (1 << 5);
+                    cpu->cpsr.f = spsr & (1 << 6);
+                    cpu->cpsr.i = spsr & (1 << 7);
+
+                    mode = (CPUMode)(spsr & 0xF);
+                }
             }
         } else {
-            if (doDisasm) std::printf("[0x%08X] = %s = 0x%08X\n", addr, regNames[i], cpu->r[i]);
+            auto data = cpu->get(i);
 
-            cpu->write32(addr, cpu->r[i]);
+            if (i == CPUReg::PC) data += 4;
+
+            if (doDisasm) std::printf("[0x%08X] = %s = 0x%08X\n", addr, regNames[i], data);
+
+            cpu->write32(addr & ~3, data);
         }
 
         // Handle post-index
@@ -850,6 +896,8 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
 
         rlist ^= 1 << i;
     }
+
+    if constexpr (isL && isS) cpu->changeMode(mode); // Restore old mode/set new mode
 
     if constexpr (isW) {
         if constexpr (!isU) addr -= 4 * std::__popcount(reglist); // Calculate lowest base address
@@ -859,7 +907,7 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
                 // ARM7 doesn't write back the new base if Rn is in reglist
 
                 // ARM9 writes back the new base if Rn is the only reg in reglist OR not the last one
-                if ((cpu->cpuID == 9) && ((std::__popcount(reglist) == 1) || ((15 - std::__countl_zero(reglist)) != (int)rn))) {
+                if ((cpu->cpuID == 9) && ((std::__popcount(reglist) == 1) || ((31 - std::__countl_zero(reglist)) != (int)rn))) {
                     cpu->r[rn] = addr;
                 }
             } else {
@@ -874,9 +922,9 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
         const auto list = getReglist(reglist);
 
         if constexpr (isW) {
-            std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str(), regNames[rn], cpu->r[rn]);
+            std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}%s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str(), (isS) ? "^" : "", regNames[rn], cpu->r[rn]);
         } else {
-            std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str());
+            std::printf("[ARM%d      ] [0x%08X] %s%s%s %s%s, {%s}%s\n", cpu->cpuID, cpu->cpc, (isL) ? "LDM" : "STM", (isU) ? "I" : "D", (isP) ? "B" : "A", regNames[rn], (isW) ? "!" : "", list.c_str(), (isS) ? "^" : "");
         }
     }
 }
@@ -902,12 +950,6 @@ void aMRS(CPU *cpu, u32 instr) {
 /* Move to Status from Register */
 template<bool isR, bool isImm>
 void aMSR(CPU *cpu, u32 instr) {
-    if constexpr (isImm) {
-        std::printf("[ARM%d      ] Unhandled immediate MSR instruction 0x%08X\n", cpu->cpuID, instr);
-
-        exit(0);
-    }
-
     // Get operands
     const auto rm = instr & 0xF;
 
@@ -920,7 +962,7 @@ void aMSR(CPU *cpu, u32 instr) {
     u32 op;
 
     if constexpr (isImm) {
-        assert(false);
+        op = rotateImm(cpu, instr & 0xFF, (instr >> 8) & 0xF);
     } else {
         assert(rm != CPUReg::PC);
 
@@ -954,7 +996,7 @@ void aMSR(CPU *cpu, u32 instr) {
         const auto cond = condNames[instr >> 28];
 
         if constexpr (isImm) {
-            assert(false);
+            std::printf("[ARM%d      ] [0x%08X] MSR%s %sPSR_%s, 0x%08X; %sPSR = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isR) ? "S" : "C", maskNames[mask], op, (isR) ? "S" : "C", op);
         } else {
             std::printf("[ARM%d      ] [0x%08X] MSR%s %sPSR_%s, %s; %sPSR = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isR) ? "S" : "C", maskNames[mask], regNames[rm], (isR) ? "S" : "C", op);
         }
@@ -1075,6 +1117,8 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
             cpu->r[rd] = cpu->read8(addr);
         } else {
             if (rd == CPUReg::PC) {
+                assert(!(addr & 3));
+
                 const auto target = cpu->read32(addr);
 
                 if (cpu->cpuID == 9) { // Change state
@@ -1085,9 +1129,7 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
                     cpu->r[CPUReg::PC] = target & ~3;
                 }
             } else {
-                assert(!(addr & 3));
-
-                cpu->r[rd] = cpu->read32(addr);
+                cpu->r[rd] = rotateRead32(cpu->read32(addr & ~3), addr);
             }
         }
     } else { // STR/STRB
@@ -1136,9 +1178,49 @@ void aSingleDataTransfer(CPU *cpu, u32 instr) {
     }
 }
 
+/* Swap word/byte */
+template<bool isB>
+void aSwap(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rd = (instr >> 12) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+    const auto rn = (instr >> 16) & 0xF;
+
+    assert((rd != CPUReg::PC) && (rm != CPUReg::PC) && (rn != CPUReg::PC));
+
+    const auto addr = cpu->r[rn];
+    const auto data = cpu->r[rm];
+
+    assert(!(addr & 3));
+
+    u32 tmp;
+
+    if constexpr (isB) {
+        tmp = cpu->read8(addr);
+
+        cpu->write8(addr, data);
+    } else {
+        tmp = cpu->read32(addr);
+
+        cpu->write32(addr, data);
+    }
+
+    cpu->r[rd] = tmp;
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        std::printf("[ARM%d      ] [0x%08X] SWP%s%s %s, %s, [%s]; %s = [0x%08X] = 0x%08X, [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, (isB) ? "B" : "", regNames[rd], regNames[rm], regNames[rn], regNames[rd], addr, cpu->r[rd], addr, regNames[rm], data);
+    }
+}
+
 /* ARM state SWI */
 void aSWI(CPU *cpu, u32 instr) {
-    if (doDisasm) std::printf("[ARM%d      ] [0x%08X] SWI 0x%06X\n", cpu->cpuID, cpu->cpc, instr & 0xFFFFFF);
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        std::printf("[ARM%d      ] [0x%08X] SWI%s 0x%06X\n", cpu->cpuID, cpu->cpc, cond, instr & 0xFFFFFF);
+    }
 
     cpu->raiseSVCException();
 }
@@ -1850,6 +1932,9 @@ void init() {
     instrTableARM[0x0E9] = &aMultiplyLong<1, 1, 0>;
     instrTableARM[0x0F9] = &aMultiplyLong<1, 1, 1>;
 
+    instrTableARM[0x109] = &aSwap<0>;
+    instrTableARM[0x149] = &aSwap<1>;
+
     instrTableARM[0x00B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 0, 0>;
     instrTableARM[0x02B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 0, 1>;
     instrTableARM[0x04B] = &aExtraLoad<ExtraLoadOpcode::STRH , 0, 0, 1, 0>;
@@ -1882,10 +1967,25 @@ void init() {
     instrTableARM[0x1BB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 0, 1>;
     instrTableARM[0x1DB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 1, 0>;
     instrTableARM[0x1FB] = &aExtraLoad<ExtraLoadOpcode::LDRH , 1, 1, 1, 1>;
+    instrTableARM[0x01D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 0, 0>;
+    instrTableARM[0x03D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 0, 1>;
+    instrTableARM[0x05D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 1, 0>;
+    instrTableARM[0x07D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 1, 1>;
+    instrTableARM[0x09D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 1, 0, 0>;
+    instrTableARM[0x0BD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 1, 0, 1>;
+    instrTableARM[0x0DD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 1, 1, 0>;
+    instrTableARM[0x0FD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 1, 1, 1>;
+    instrTableARM[0x11D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 0, 0, 0>;
+    instrTableARM[0x13D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 0, 0, 1>;
+    instrTableARM[0x15D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 0, 1, 0>;
+    instrTableARM[0x17D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 0, 1, 1>;
+    instrTableARM[0x19D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 0, 0>;
+    instrTableARM[0x1BD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 0, 1>;
+    instrTableARM[0x1DD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 1, 0>;
+    instrTableARM[0x1FD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 1, 1>;
 
     //instrTableARM[0x00D] = &aExtraLoad<ExtraLoadOpcode::LDRD , 0, 0, 0, 0>;
     //instrTableARM[0x00F] = &aExtraLoad<ExtraLoadOpcode::STRD , 0, 0, 0, 0>;
-    //instrTableARM[0x01D] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 0, 0, 0, 0>;
     //instrTableARM[0x01F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 0, 0>;
 
     instrTableARM[0x100] = &aMRS<0>;
@@ -1895,6 +1995,11 @@ void init() {
     
     instrTableARM[0x121] = &aBX;
     instrTableARM[0x123] = &aBLX<0>;
+
+    for (int i = 0x320; i < 0x330; i++) {
+        instrTableARM[i | (0 << 6)] = &aMSR<0, 1>;
+        instrTableARM[i | (1 << 6)] = &aMSR<1, 1>;
+    }
 
     for (int i = 0x400; i < 0x600; i++) {
         // Immediate SDT
