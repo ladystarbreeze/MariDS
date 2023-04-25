@@ -6,8 +6,10 @@
 #include "ppu.hpp"
 
 #include <cstdio>
+#include <vector>
 
 #include "intc.hpp"
+#include "MariDS.hpp"
 #include "scheduler.hpp"
 
 namespace nds::ppu {
@@ -31,6 +33,8 @@ struct DISPSTAT {
 
     u16 lyc;
 };
+
+std::vector<u8> vram;
 
 DISPSTAT dispstat;
 
@@ -63,6 +67,8 @@ void scanlineEvent(i64 c) {
             intc::sendInterrupt7(IntSource::VBLANK);
             intc::sendInterrupt9(IntSource::VBLANK);
         }
+
+        update(vram.data());
     } else if (vcount == (LINES_PER_FRAME - 1)) {
         dispstat.vblank = false; // Is turned off on the last scanline
     } else if (vcount == LINES_PER_FRAME) {
@@ -88,6 +94,16 @@ void init() {
 
     scheduler::addEvent(idHBLANK  , 0, CYCLES_PER_HDRAW);
     scheduler::addEvent(idScanline, 0, CYCLES_PER_SCANLINE);
+
+    vram.resize(0xA4000);
+}
+
+void writeVRAM16(u32 addr, u16 data) {
+    std::memcpy(&vram[addr], &data, sizeof(u16));
+}
+
+void writeVRAM32(u32 addr, u32 data) {
+    std::memcpy(&vram[addr], &data, sizeof(u32));
 }
 
 u16 readDISPSTAT() {

@@ -44,4 +44,8 @@ set(HEADERS
     src/core/cpu/cp15.hpp
 )
 
+find_package(SDL2 REQUIRED)
+include_directories(MariDS ${SDL2_INCLUDE_DIRS})
+
 add_executable(MariDS ${SOURCES} ${HEADERS})
+target_link_libraries(MariDS ${SDL2_LIBRARIES})

@@ -217,7 +217,7 @@ u16 read16ARM7(u32 addr) {
                 return ppu::readDISPSTAT();
             case static_cast<u32>(Memory9Base::MMIO) + 0x130:
                 std::printf("[Bus:ARM7  ] Read16 @ KEYINPUT\n");
-                return -1;
+                return getKEYINPUT();
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read16 @ 0x%08X\n", addr);
 
@@ -264,7 +264,9 @@ u32 read32ARM7(u32 addr) {
 }
 
 u8 read8ARM9(u32 addr) {
-    if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
+    if (inRange(addr, static_cast<u32>(Memory9Base::Main), 2 * static_cast<u32>(Memory9Limit::Main))) {
+        return mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)];
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::read32ARM9(addr);
     } else {
         switch (addr) {
@@ -300,9 +302,15 @@ u16 read16ARM9(u32 addr) {
     } else if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
         std::memcpy(&data, &bios9[addr & 0xFFE], sizeof(u16));
     } else {
-        std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
+        switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 0x130:
+                std::printf("[Bus:ARM9  ] Read16 @ KEYINPUT\n");
+                return getKEYINPUT();
+            default:
+                std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
 
-        exit(0);
+                exit(0);
+        }
     }
 
     return data;
@@ -504,12 +512,16 @@ void write16ARM9(u32 addr, u16 data) {
         } else {
             std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X (Display Engine A) = 0x%08X\n", addr, data);
         }
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::DMA), 0x30)) {
+        return dma::write16ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Timer), 0x10)) {
         return timer::write16ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) { // Same memory base as ARM7
         return ipc::write16ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::write16ARM9(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
+        ppu::writeVRAM16(addr - static_cast<u32>(Memory9Base::LCDC), data);
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x204:
@@ -546,7 +558,7 @@ void write32ARM9(u32 addr, u32 data) {
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Pal), static_cast<u32>(Memory9Limit::Pal))) {
         // TODO: implement palette writes
     } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
-        // TODO: implement VRAM writes
+        ppu::writeVRAM32(addr - static_cast<u32>(Memory9Base::LCDC), data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::OAM), static_cast<u32>(Memory9Limit::Pal))) {
         // TODO: implement object attribute memory writes
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DTCM1), static_cast<u32>(Memory9Limit::DTCM))) {

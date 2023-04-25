@@ -18,15 +18,48 @@
 #include "cpu/cpu.hpp"
 #include "cpu/cpuint.hpp"
 
+#include <SDL2/SDL.h>
+
+#undef main
+
 namespace nds {
+
+// MariDS constants
+
+constexpr auto SCREEN_WIDTH  = 256;
+constexpr auto SCREEN_HEIGHT = 2 * 192;
 
 cpu::CP15 cp15;
 
 cpu::CPU arm7(7, NULL), arm9(9, &cp15);
 
+// SDL2
+SDL_Renderer *renderer;
+SDL_Window *window;
+SDL_Texture *texture;
+
+SDL_Event e;
+
+u16 keyinput = -1;
+
+bool isRunning = true;
+
 /* Returns true if address is in range [base;limit] */
 bool inRange(u64 addr, u64 base, u64 limit) {
     return (addr >= base) && (addr < (base + limit));
+}
+
+void initSDL() {
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+
+    SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT, 0, &window, &renderer);
+    SDL_SetWindowSize(window, 2 * SCREEN_WIDTH, 2 * SCREEN_HEIGHT);
+    SDL_RenderSetLogicalSize(renderer, 2 * SCREEN_WIDTH, 2 * SCREEN_HEIGHT);
+    SDL_SetWindowResizable(window, SDL_FALSE);
+    SDL_SetWindowTitle(window, "MariDS");
+
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_XBGR1555, SDL_TEXTUREACCESS_STREAMING, SCREEN_WIDTH, SCREEN_HEIGHT);
 }
 
 void init(const char *bios7Path, const char *bios9Path, const char *firmPath, const char *gamePath, bool doFastBoot) {
@@ -156,10 +189,46 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
         bus::setPOSTFLG(1);
     }
+
+    initSDL();
+}
+
+void update(const u8 *fb) {
+    const u8 *keyState = SDL_GetKeyboardState(NULL);
+
+    SDL_PollEvent(&e);
+
+    keyinput = 0;
+
+    switch (e.type) {
+        case SDL_QUIT   : isRunning = false; break;
+        case SDL_KEYDOWN:
+            if (keyState[SDL_GetScancodeFromKey(SDLK_d)]) keyinput |= 1 << 0; // A
+            if (keyState[SDL_GetScancodeFromKey(SDLK_s)]) keyinput |= 1 << 1; // B
+            if (keyState[SDL_GetScancodeFromKey(SDLK_c)]) keyinput |= 1 << 2; // SELECT
+            if (keyState[SDL_GetScancodeFromKey(SDLK_v)]) keyinput |= 1 << 3; // START
+            if (keyState[SDL_GetScancodeFromKey(SDLK_h)]) keyinput |= 1 << 4; // RIGHT
+            if (keyState[SDL_GetScancodeFromKey(SDLK_f)]) keyinput |= 1 << 5; // LEFT
+            if (keyState[SDL_GetScancodeFromKey(SDLK_t)]) keyinput |= 1 << 6; // UP
+            if (keyState[SDL_GetScancodeFromKey(SDLK_g)]) keyinput |= 1 << 7; // DOWN
+            if (keyState[SDL_GetScancodeFromKey(SDLK_e)]) keyinput |= 1 << 8; // R
+            if (keyState[SDL_GetScancodeFromKey(SDLK_q)]) keyinput |= 1 << 9; // L
+            break;
+    }
+
+    keyinput = ~keyinput;
+
+    SDL_UpdateTexture(texture, nullptr, fb, 2 * SCREEN_WIDTH);
+    SDL_RenderCopy   (renderer, texture, nullptr, nullptr);
+    SDL_RenderPresent(renderer);
+}
+
+u16 getKEYINPUT() {
+    return keyinput;
 }
 
 void run() {
-    while (true) {
+    while (isRunning) {
         const auto runCycles = scheduler::getRunCycles();
 
         scheduler::processEvents(runCycles);

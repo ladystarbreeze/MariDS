@@ -5,10 +5,15 @@
 
 #pragma once
 
+#include "../common/types.hpp"
+
 namespace nds {
 
 void init(const char *bios7Path, const char *bios9Path, const char *firmPath, const char *gamePath, bool doFastBoot);
 void run();
+void update(const u8 *fb);
+
+u16 getKEYINPUT();
 
 void haltCPU(int cpuID);
 void unhaltCPU(int cpuID);
