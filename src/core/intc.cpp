@@ -81,6 +81,18 @@ u32 read32ARM7(u32 addr) {
     }
 }
 
+u8 read8ARM9(u32 addr) {
+    switch (addr) {
+        case INTCReg::IME:
+            std::printf("[INTC:ARM9 ] Read8 @ IME\n");
+            return ime9;
+        default:
+            std::printf("[INTC:ARM9 ] Unhandled read8 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+}
+
 u32 read32ARM9(u32 addr) {
     switch (addr) {
         case INTCReg::IME:
@@ -110,6 +122,22 @@ void write8ARM7(u32 addr, u8 data) {
             break;
         default:
             std::printf("[INTC:ARM7 ] Unhandled write8 @ 0x%08X = 0x%02X\n", addr, data);
+
+            exit(0);
+    }
+}
+
+void write16ARM7(u32 addr, u16 data) {
+    switch (addr) {
+        case INTCReg::IME:
+            std::printf("[INTC:ARM7 ] Write16 @ IME = 0x%04X\n", data);
+            
+            ime7 = data & 1;
+
+            checkInterrupt7();
+            break;
+        default:
+            std::printf("[INTC:ARM7 ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
 
             exit(0);
     }
