@@ -253,6 +253,30 @@ void write16ARM7(u32 addr, u16 data) {
     }
 }
 
+void write16ARM9(u32 addr, u16 data) {
+    const auto chnID = (addr >= static_cast<u32>(DMAReg::DMAFILL)) ? (addr >> 2) & 3 : getChnID(addr);
+
+    auto &chn = channels9[chnID];
+
+    if (addr >= static_cast<u32>(DMAReg::DMAFILL)) {
+        std::printf("[DMA:ARM9  ] Unhandled write16 @ DMA%dFILL = 0x%04X\n", chnID, data);
+
+        exit(0);
+    } else {
+        switch (addr - 12 * chnID) {
+            case static_cast<u32>(DMAReg::DMACNT):
+                std::printf("[DMA:ARM9  ] Write16 @ DMA%dCNT_L = 0x%04X\n", chnID, data);
+                
+                chn.ctr[1] = (chn.ctr[1] & 0xFFFF0000) | (u32)data;
+                break;
+            default:
+                std::printf("[DMA:ARM9  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
+
+                exit(0);
+        }
+    }
+}
+
 void write32ARM9(u32 addr, u32 data) {
     const auto chnID = (addr >= static_cast<u32>(DMAReg::DMAFILL)) ? (addr >> 2) & 3 : getChnID(addr);
 
