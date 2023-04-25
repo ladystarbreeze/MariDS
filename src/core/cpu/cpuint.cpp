@@ -44,7 +44,7 @@ constexpr const char *shiftNames[] = {
 };
 
 constexpr const char *thumbLoadNames[] = {
-    "STR", "STRH", "N/A", "N/A", "LDR", "LDRH", "LDRB", "LDRSH",
+    "STR", "STRH", "N/A", "LDRSB", "LDR", "LDRH", "LDRB", "LDRSH",
 };
 
 /* Condition codes */
@@ -79,6 +79,7 @@ enum class THUMBDPOpcode {
 enum class THUMBLoadOpcode {
     STR   = 0,
     STRH  = 1,
+    LDRSB = 3,
     LDR   = 4,
     LDRH  = 5,
     LDRB  = 6,
@@ -126,11 +127,11 @@ bool testCond(CPU *cpu, Condition cond) {
         case Condition::VS: return cpsr.v;
         case Condition::VC: return !cpsr.v;
         case Condition::HI: return cpsr.c && !cpsr.z;
-        case Condition::LS: return cpsr.z && !cpsr.c;
+        case Condition::LS: return cpsr.z || !cpsr.c;
         case Condition::GE: return cpsr.n == cpsr.v;
         case Condition::LT: return cpsr.n != cpsr.v;
         case Condition::GT: return (cpsr.n == cpsr.v) && !cpsr.z;
-        case Condition::LE: return (cpsr.n != cpsr.v) && cpsr.z;
+        case Condition::LE: return (cpsr.n != cpsr.v) || cpsr.z;
         case Condition::AL: return true;
         case Condition::NV: return true; // Requires special handling on ARM9
     }
@@ -279,8 +280,8 @@ u32 doROR(CPU *cpu, u32 data, u32 amt) {
 
         cpu->cout = data & 1;
 
-        return (data >> 1) | (data << 31);
-    } else {
+        return std::__rotr(data, 1);
+    } else { // RRX
         cpu->cout = data & 1;
 
         return (data >> 1) | ((u32)cpu->cpsr.c << 31);
@@ -1638,9 +1639,7 @@ void tLoadImmediateOffset(CPU *cpu, u16 instr) {
         if constexpr (isB) {
             cpu->r[rd] = cpu->read8(addr);
         } else {
-            assert(!(addr & 3));
-
-            cpu->r[rd] = cpu->read32(addr);
+            cpu->r[rd] = rotateRead32(cpu->read32(addr & ~3), addr);
         }
     } else {
         if constexpr (isB) {
@@ -1744,9 +1743,10 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
             cpu->write16(addr & ~1, data);
             break;
         case THUMBLoadOpcode::LDR:
-            assert(!(addr & 3));
-
-            cpu->r[rd] = cpu->read32(addr);
+            cpu->r[rd] = rotateRead32(cpu->read32(addr & ~3), addr);
+            break;
+        case THUMBLoadOpcode::LDRSB:
+            cpu->r[rd] = (i8)cpu->read8(addr);
             break;
         case THUMBLoadOpcode::LDRH:
             assert(!(addr & 1));
@@ -2199,6 +2199,7 @@ void init() {
         switch ((i >> 3) & 7) {
             case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR  >; break;
             case 1: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STRH >; break;
+            case 3: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRSB>; break;
             case 4: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDR  >; break;
             case 5: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRH >; break;
             case 6: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRB >; break;
