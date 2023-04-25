@@ -8,6 +8,8 @@
 #include <cassert>
 #include <cstdio>
 
+#include "../MariDS.hpp"
+
 namespace nds::cpu::cp15 {
 
 enum CP15Reg {
@@ -17,6 +19,7 @@ enum CP15Reg {
     CWB      = 0x0300,
     EAPDPR   = 0x0502,
     EAPIPR   = 0x0503,
+    WFI      = 0x0704,
     IIC      = 0x0750,
     IDC      = 0x0760,
     DWB      = 0x07A4,
@@ -72,6 +75,11 @@ void CP15::set(u32 idx, u32 data) {
         case 0x0660:
         case 0x0670:
             std::printf("[ARM9:CP15 ] Write @ PU data region %u = 0x%08X\n", (idx >> 4) & 0xF, data);
+            break;
+        case CP15Reg::WFI:
+            std::printf("[ARM9:CP15 ] Wait for interrupt\n");
+
+            haltCPU(9);
             break;
         case CP15Reg::IIC:
             std::printf("[ARM9:CP15 ] Invalidate instruction cache\n");
