@@ -13,7 +13,7 @@ namespace nds::cpu::interpreter {
 
 // Interpreter constants
 
-auto doDisasm = true;
+auto doDisasm = false;
 
 constexpr const char *condNames[] = {
     "EQ", "NE", "HS", "LO", "MI", "PL", "VS", "VC",
@@ -142,6 +142,17 @@ void setBitFlags(CPU *cpu, u32 c) {
     cpu->cpsr.z = !c;
     cpu->cpsr.c = cpu->cout; // Carry out of barrel shifter
     // V is left untouched
+}
+
+/* Sets ADC flags */
+void setADCFlags(CPU *cpu, u32 a, u32 b, u64 c) {
+    const auto cin = (u64)cpu->cpsr.c;
+    const auto c32 = (u32)c;
+
+    cpu->cpsr.n = c32 & (1 << 31);
+    cpu->cpsr.z = !c32;
+    cpu->cpsr.c = c & (1llu << 32);
+    cpu->cpsr.v = ((~(a ^ b) & ((a + b) ^ b)) ^ (~((a + b) ^ cin) & (c32 ^ cin))) >> 31; // ???
 }
 
 /* Sets ADD/CMN flags */
@@ -479,6 +490,15 @@ void aDataProcessing(CPU *cpu, u32 instr) {
                 cpu->r[rd] = res;
             }
             break;
+        case DPOpcode::EOR:
+            {
+                const auto res = op1 ^ op2;
+
+                if (S) setBitFlags(cpu, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
         case DPOpcode::SUB:
             {
                 const auto res = op1 - op2;
@@ -488,11 +508,29 @@ void aDataProcessing(CPU *cpu, u32 instr) {
                 cpu->r[rd] = res;
             }
             break;
+        case DPOpcode::RSB:
+            {
+                const auto res = op2 - op1;
+
+                if (S) setSubFlags(cpu, op2, op1, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
         case DPOpcode::ADD:
             {
                 const auto res = op1 + op2;
 
                 if (S) setAddFlags(cpu, op1, op2, res);
+
+                cpu->r[rd] = res;
+            }
+            break;
+        case DPOpcode::ADC:
+            {
+                const auto res = (u64)op1 + (u64)op2 + (u64)cpu->cpsr.c;
+
+                setADCFlags(cpu, op1, op2, res);
 
                 cpu->r[rd] = res;
             }
@@ -511,6 +549,11 @@ void aDataProcessing(CPU *cpu, u32 instr) {
             assert(isS && (rd != CPUReg::PC)); // Safeguard
 
             setSubFlags(cpu, op1, op2, op1 - op2);
+            break;
+        case DPOpcode::CMN:
+            assert(isS && (rd != CPUReg::PC)); // Safeguard
+
+            setAddFlags(cpu, op1, op2, op1 + op2);
             break;
         case DPOpcode::ORR:
             {
@@ -534,6 +577,11 @@ void aDataProcessing(CPU *cpu, u32 instr) {
 
                 cpu->r[rd] = res;
             }
+            break;
+        case DPOpcode::MVN:
+            if (S) setBitFlags(cpu, ~op2);
+
+            cpu->r[rd] = ~op2;
             break;
         default:
             std::printf("[ARM%d      ] Unhandled Data Processing opcode %s\n", cpu->cpuID, dpNames[static_cast<int>(opcode)]);
@@ -663,16 +711,24 @@ void aExtraLoad(CPU *cpu, u32 instr) {
             "N/A", "H", "D", "D", "N/A", "H", "SB", "SH",
         };
 
-        assert(isI);
-
         const auto cond = condNames[instr >> 28];
 
-        if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
-            std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%02X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
-        } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
-            std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
+        if constexpr (isI) {
+            if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
+                std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s0x%02X%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+            } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
+                std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s0x%02X%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", offset, (isP) ? "]" : "", addr, regNames[rd], data);
+            } else {
+                assert(false); // TODO: LDRD/STRD
+            }
         } else {
-            assert(false); // TODO: LDRD/STRD
+            if constexpr ((opcode == ExtraLoadOpcode::LDRH) || (opcode == ExtraLoadOpcode::LDRSB) || (opcode == ExtraLoadOpcode::LDRSB)) {
+                std::printf("[ARM%d      ] [0x%08X] LDR%s%s %s, %s[%s%s, %s%s%s; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", regNames[rm], (isP) ? "]" : "", regNames[rd], addr, cpu->get(rd));
+            } else if constexpr (opcode == ExtraLoadOpcode::STRH) {
+                std::printf("[ARM%d      ] [0x%08X] STR%s%s %s, %s[%s%s, %s%s%s; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, elNames[static_cast<int>(opcode)], regNames[rd], (isW) ? "!" : "", regNames[rn], (!isP) ? "]" : "", (!isU) ? "-" : "", regNames[rm], (isP) ? "]" : "", addr, regNames[rd], data);
+            } else {
+                assert(false); // TODO: LDRD/STRD
+            }
         }
     }
 }
@@ -1147,6 +1203,15 @@ void tDataProcessing(CPU *cpu, u16 instr) {
             cpu->r[rd] = shift<ShiftType::LSR, false>(cpu, cpu->r[rd], cpu->r[rm]);
 
             setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::ADC:
+            {
+                const auto res = (u64)cpu->r[rd] + (u64)cpu->r[rm] + (u64)cpu->cpsr.c;
+
+                setADCFlags(cpu, cpu->r[rd], cpu->r[rm], res);
+
+                cpu->r[rd] = res;
+            }
             break;
         case THUMBDPOpcode::NEG:
             cpu->r[rd] = 0 - cpu->r[rm];
