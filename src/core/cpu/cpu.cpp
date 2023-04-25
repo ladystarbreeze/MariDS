@@ -70,6 +70,21 @@ void CPU::setEntry(u32 addr) {
     r[CPUReg::PC] = addr;
 
     changeMode(CPUMode::SYS); // Only happens when fast booting, so we have to do this
+
+    r[CPUReg::R12] = addr;
+    r[CPUReg::LR ] = addr;
+
+    if (cpuID == 7) {
+        r[CPUReg::SP] = 0x03002F7C;
+
+        spIRQ = 0x03003F80;
+        spSVC = 0x03003FC0;
+    } else {
+        r[CPUReg::SP] = 0x0380FD80;
+
+        spIRQ = 0x0380FF80;
+        spSVC = 0x0380FFC0;
+    }
 }
 
 /* Returns PC + 4 or a register without offset */
