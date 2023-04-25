@@ -13,7 +13,7 @@ namespace nds::cpu::interpreter {
 
 // Interpreter constants
 
-auto doDisasm = false;
+constexpr auto doDisasm = false;
 
 constexpr const char *condNames[] = {
     "EQ", "NE", "HS", "LO", "MI", "PL", "VS", "VC",
@@ -414,6 +414,23 @@ void aBX(CPU *cpu, u32 instr) {
         const auto cond = condNames[instr >> 28];
 
         std::printf("[ARM%d      ] [0x%08X] BX%s %s; PC = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, regNames[rm], cpu->r[CPUReg::PC]);
+    }
+}
+
+/* Count leading zeroes */
+void aCLZ(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rd = (instr >> 12) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+
+    assert((rd != CPUReg::PC) && (rm != CPUReg::PC));
+
+    cpu->r[rd] = (!cpu->r[rm]) ? 32 : std::__countl_zero(cpu->r[rm]);
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        std::printf("[ARM%d      ] [0x%08X] CLZ%s %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, cond, regNames[rd], regNames[rm], regNames[rd], cpu->r[rd]);
     }
 }
 
@@ -1848,6 +1865,13 @@ void tShift(CPU *cpu, u16 instr) {
     if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] %sS %s, %s, %u; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, shiftNames[static_cast<int>(stype)], regNames[rd], regNames[rm], amt, regNames[rd], cpu->r[rd]);
 }
 
+/* THUMB state SWI */
+void tSWI(CPU *cpu, u16 instr) {
+    if (doDisasm) std::printf("[ARM%d:T    ] [0x%08X] SWI 0x%02X\n", cpu->cpuID, cpu->cpc, instr & 0xFF);
+
+    cpu->raiseSVCException();
+}
+
 void decodeUnconditional(CPU *cpu, u32 instr) {
     assert(cpu->cpuID == 9);
 
@@ -2003,6 +2027,8 @@ void init() {
     
     instrTableARM[0x121] = &aBX;
     instrTableARM[0x123] = &aBLX<0>;
+
+    instrTableARM[0x161] = &aCLZ;
 
     for (int i = 0x320; i < 0x330; i++) {
         instrTableARM[i | (0 << 6)] = &aMSR<0, 1>;
@@ -2256,7 +2282,9 @@ void init() {
     }
 
     for (int i = 0x340; i < 0x380; i++) {
-        if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
+        if ((i >> 2) == 0xDF) {
+            instrTableTHUMB[i] = &tSWI;
+        } else if (((i >> 2) != 0xDE) && ((i >> 2) != 0xDF)) {
             instrTableTHUMB[i] = &tConditionalBranch;
         }
     }
