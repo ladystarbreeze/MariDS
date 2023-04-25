@@ -38,7 +38,7 @@ u16 read16ARM7(u32 addr) {
     switch (addr) {
         case static_cast<u32>(IPCReg::IPCSYNC):
             {
-                std::printf("[IPC:ARM7  ] Read16 @ IPCSYNC\n");
+                //std::printf("[IPC:ARM7  ] Read16 @ IPCSYNC\n");
 
                 auto &sync      = ipcsync[0];
                 auto &otherSync = ipcsync[1];
@@ -47,6 +47,20 @@ u16 read16ARM7(u32 addr) {
 
                 data |= (u16)sync.out   << 8;
                 data |= (u16)sync.irqen << 14;
+            }
+            break;
+        case static_cast<u32>(IPCReg::IPCFIFOCNT):
+            {
+                std::printf("[IPC:ARM7  ] Read16 @ IPCFIFOCNT\n");
+
+                auto &cnt = ipcfifocnt[0];
+
+                data = (1 << 8) | (1 << 0);
+
+                data |= (u16)cnt.sirqen <<  2;
+                data |= (u16)cnt.rirqen << 10;
+                data |= (u16)cnt.error  << 14;
+                data |= (u16)cnt.fifoen << 15;
             }
             break;
         default:
@@ -75,6 +89,20 @@ u16 read16ARM9(u32 addr) {
                 data |= (u16)sync.irqen << 14;
             }
             break;
+        case static_cast<u32>(IPCReg::IPCFIFOCNT):
+            {
+                std::printf("[IPC:ARM9  ] Read16 @ IPCFIFOCNT\n");
+
+                auto &cnt = ipcfifocnt[1];
+
+                data = (1 << 8) | (1 << 0);
+
+                data |= (u16)cnt.sirqen <<  2;
+                data |= (u16)cnt.rirqen << 10;
+                data |= (u16)cnt.error  << 14;
+                data |= (u16)cnt.fifoen << 15;
+            }
+            break;
         default:
             std::printf("[IPC:ARM9  ] Unhandled read16 @ 0x%08X\n", addr);
 
@@ -88,7 +116,7 @@ void write16ARM7(u32 addr, u16 data) {
     switch (addr) {
         case static_cast<u32>(IPCReg::IPCSYNC):
             {
-                std::printf("[IPC:ARM7  ] Write16 @ IPCSYNC = 0x%04X\n", data);
+                //std::printf("[IPC:ARM7  ] Write16 @ IPCSYNC = 0x%04X\n", data);
 
                 auto &sync      = ipcsync[0];
                 auto &otherSync = ipcsync[1];
@@ -97,6 +125,25 @@ void write16ARM7(u32 addr, u16 data) {
                 sync.irqen = data & (1 << 14);
 
                 assert(!otherSync.irqen);
+            }
+            break;
+        case static_cast<u32>(IPCReg::IPCFIFOCNT):
+            {
+                std::printf("[IPC:ARM7  ] Write16 @ IPCFIFOCNT = 0x%04X\n", data);
+
+                auto &cnt = ipcfifocnt[0];
+
+                cnt.sirqen = data & (1 <<  2);
+                cnt.rirqen = data & (1 << 10);
+                cnt.fifoen = data & (1 << 15);
+
+                if (data & (1 << 3)) { // Clear SEND
+
+                }
+
+                if (data & (1 << 14)) { // Clear ERROR
+                    cnt.error = false;
+                }
             }
             break;
         default:
@@ -110,7 +157,7 @@ void write16ARM9(u32 addr, u16 data) {
     switch (addr) {
         case static_cast<u32>(IPCReg::IPCSYNC):
             {
-                std::printf("[IPC:ARM9  ] Write16 @ IPCSYNC = 0x%04X\n", data);
+                //std::printf("[IPC:ARM9  ] Write16 @ IPCSYNC = 0x%04X\n", data);
 
                 auto &sync      = ipcsync[1];
                 auto &otherSync = ipcsync[0];
@@ -135,7 +182,7 @@ void write16ARM9(u32 addr, u16 data) {
 
                 }
 
-                if (data & (1 << 14)) { // Clear SEND
+                if (data & (1 << 14)) { // Clear ERROR
                     cnt.error = false;
                 }
             }
