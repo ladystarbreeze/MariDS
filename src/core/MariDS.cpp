@@ -109,7 +109,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
         //assert(inRange(arm9Entry, 0x02000000, 0x3BFE00));
         //assert(inRange(arm9Addr , 0x02000000, 0x3BFE00));
 
-        arm9Size = std::max(arm9Size, (u32)0x3BFE00);
+        arm9Size = std::min(arm9Size, (u32)0x3BFE00);
 
         std::vector<u8> arm9Binary;
 
@@ -128,7 +128,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
         //assert(inRange(arm7Entry, 0x02000000, 0x3BFE00) || inRange(arm7Entry, 0x037F8000, 0xFE00));
         //assert(inRange(arm7Addr , 0x02000000, 0x3BFE00) || inRange(arm7Addr , 0x037F8000, 0xFE00));
 
-        arm7Size = (arm7Addr >= 0x037F8000) ? std::max(arm7Size, (u32)0xFE00) : std::max(arm7Size, (u32)0x3BFE00);
+        arm7Size = (arm7Addr >= 0x037F8000) ? std::min(arm7Size, (u32)0xFE00) : std::min(arm7Size, (u32)0x3BFE00);
 
         std::vector<u8> arm7Binary;
 
