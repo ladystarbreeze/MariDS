@@ -196,24 +196,24 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 void update(const u8 *fb) {
     const u8 *keyState = SDL_GetKeyboardState(NULL);
 
-    SDL_PollEvent(&e);
-
     keyinput = 0;
 
-    switch (e.type) {
-        case SDL_QUIT   : isRunning = false; break;
-        case SDL_KEYDOWN:
-            if (keyState[SDL_GetScancodeFromKey(SDLK_h)]) keyinput |= 1 << 0; // A
-            if (keyState[SDL_GetScancodeFromKey(SDLK_g)]) keyinput |= 1 << 1; // B
-            if (keyState[SDL_GetScancodeFromKey(SDLK_c)]) keyinput |= 1 << 2; // SELECT
-            if (keyState[SDL_GetScancodeFromKey(SDLK_v)]) keyinput |= 1 << 3; // START
-            if (keyState[SDL_GetScancodeFromKey(SDLK_d)]) keyinput |= 1 << 4; // RIGHT
-            if (keyState[SDL_GetScancodeFromKey(SDLK_a)]) keyinput |= 1 << 5; // LEFT
-            if (keyState[SDL_GetScancodeFromKey(SDLK_w)]) keyinput |= 1 << 6; // UP
-            if (keyState[SDL_GetScancodeFromKey(SDLK_s)]) keyinput |= 1 << 7; // DOWN
-            if (keyState[SDL_GetScancodeFromKey(SDLK_e)]) keyinput |= 1 << 8; // R
-            if (keyState[SDL_GetScancodeFromKey(SDLK_q)]) keyinput |= 1 << 9; // L
-            break;
+    while (SDL_PollEvent(&e)) {
+        switch (e.type) {
+            case SDL_QUIT   : isRunning = false; break;
+            case SDL_KEYDOWN:
+                if (keyState[SDL_GetScancodeFromKey(SDLK_h)]) keyinput |= 1 << 0; // A
+                if (keyState[SDL_GetScancodeFromKey(SDLK_g)]) keyinput |= 1 << 1; // B
+                if (keyState[SDL_GetScancodeFromKey(SDLK_c)]) keyinput |= 1 << 2; // SELECT
+                if (keyState[SDL_GetScancodeFromKey(SDLK_v)]) keyinput |= 1 << 3; // START
+                if (keyState[SDL_GetScancodeFromKey(SDLK_d)]) keyinput |= 1 << 4; // RIGHT
+                if (keyState[SDL_GetScancodeFromKey(SDLK_a)]) keyinput |= 1 << 5; // LEFT
+                if (keyState[SDL_GetScancodeFromKey(SDLK_w)]) keyinput |= 1 << 6; // UP
+                if (keyState[SDL_GetScancodeFromKey(SDLK_s)]) keyinput |= 1 << 7; // DOWN
+                if (keyState[SDL_GetScancodeFromKey(SDLK_e)]) keyinput |= 1 << 8; // R
+                if (keyState[SDL_GetScancodeFromKey(SDLK_q)]) keyinput |= 1 << 9; // L
+                break;
+        }
     }
 
     keyinput = ~keyinput;
