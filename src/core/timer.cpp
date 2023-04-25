@@ -12,7 +12,7 @@
 
 namespace nds::timer {
 
-using IntSource7 = intc::IntSource7;
+using IntSource = intc::IntSource;
 
 enum class TimerReg {
     TMCNT   = 0x04000100,
@@ -48,7 +48,7 @@ void checkCascade(int tmID) {
             // Reload counter, trigger interrupt
             tm.ctr = tm.reload;
 
-            if (cnt.irqen) intc::sendInterrupt7((IntSource7)(tmID + 3));
+            if (cnt.irqen) intc::sendInterrupt7((IntSource)(tmID + 3));
 
             // Check previous timer for cascade
             if (tmID > 0) checkCascade(tmID - 1);
@@ -81,7 +81,7 @@ void run(i64 runCycles) {
                 // Reload counter, trigger interrupt
                 tm.ctr = tm.reload;
 
-                if (cnt.irqen) intc::sendInterrupt7((IntSource7)(i + 3));
+                if (cnt.irqen) intc::sendInterrupt7((IntSource)(i + 3));
 
                 // Check previous timer for cascade
                 if (i > 0) checkCascade(i - 1);
