@@ -71,6 +71,18 @@ void sendInterrupt9(IntSource intSource) {
     checkInterrupt9();
 }
 
+u16 read16ARM7(u32 addr) {
+    switch (addr) {
+        case INTCReg::IME:
+            std::printf("[INTC:ARM7 ] Read16 @ IME\n");
+            return ime7;
+        default:
+            std::printf("[INTC:ARM7 ] Unhandled read16 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+}
+
 u32 read32ARM7(u32 addr) {
     switch (addr) {
         case INTCReg::IME:
@@ -96,6 +108,18 @@ u8 read8ARM9(u32 addr) {
             return ime9;
         default:
             std::printf("[INTC:ARM9 ] Unhandled read8 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+}
+
+u16 read16ARM9(u32 addr) {
+    switch (addr) {
+        case INTCReg::IME:
+            std::printf("[INTC:ARM9 ] Read16 @ IME\n");
+            return ime9;
+        default:
+            std::printf("[INTC:ARM9 ] Unhandled read16 @ 0x%08X\n", addr);
 
             exit(0);
     }

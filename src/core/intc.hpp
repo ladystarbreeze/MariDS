@@ -27,9 +27,11 @@ enum IntSource {
 void sendInterrupt7(IntSource intSource);
 void sendInterrupt9(IntSource intSource);
 
+u16 read16ARM7(u32 addr);
 u32 read32ARM7(u32 addr);
 
 u8  read8ARM9 (u32 addr);
+u16 read16ARM9(u32 addr);
 u32 read32ARM9(u32 addr);
 
 void write8ARM7 (u32 addr, u8  data);
