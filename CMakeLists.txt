@@ -16,6 +16,7 @@ set(SOURCES
     src/core/intc.cpp
     src/core/ipc.cpp
     src/core/MariDS.cpp
+    src/core/math.cpp
     src/core/ppu.cpp
     src/core/scheduler.cpp
     src/core/spi.cpp
@@ -35,6 +36,7 @@ set(HEADERS
     src/core/intc.hpp
     src/core/ipc.hpp
     src/core/MariDS.hpp
+    src/core/math.hpp
     src/core/ppu.hpp
     src/core/scheduler.hpp
     src/core/spi.hpp
