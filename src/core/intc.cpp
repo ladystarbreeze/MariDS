@@ -55,12 +55,20 @@ void checkInterrupt9() {
     }
 }
 
-void sendInterrupt7(IntSource7 intSource) {
+void sendInterrupt7(IntSource intSource) {
     std::printf("[INTC:ARM7 ] %s interrupt request\n", intNames[intSource]);
 
     if7 |= 1 << intSource;
 
     checkInterrupt7();
+}
+
+void sendInterrupt9(IntSource intSource) {
+    std::printf("[INTC:ARM9 ] %s interrupt request\n", intNames[intSource]);
+
+    if9 |= 1 << intSource;
+
+    checkInterrupt9();
 }
 
 u32 read32ARM7(u32 addr) {
@@ -180,6 +188,22 @@ void write8ARM9(u32 addr, u8 data) {
             break;
         default:
             std::printf("[INTC:ARM9 ] Unhandled write8 @ 0x%08X = 0x%02X\n", addr, data);
+
+            exit(0);
+    }
+}
+
+void write16ARM9(u32 addr, u16 data) {
+    switch (addr) {
+        case INTCReg::IME:
+            std::printf("[INTC:ARM9 ] Write16 @ IME = 0x%04X\n", data);
+            
+            ime9 = data & 1;
+
+            checkInterrupt9();
+            break;
+        default:
+            std::printf("[INTC:ARM9 ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
 
             exit(0);
     }

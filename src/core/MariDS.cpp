@@ -12,6 +12,8 @@
 #include "bus.hpp"
 #include "cartridge.hpp"
 #include "firmware.hpp"
+#include "ppu.hpp"
+#include "scheduler.hpp"
 #include "timer.hpp"
 #include "cpu/cpu.hpp"
 #include "cpu/cpuint.hpp"
@@ -32,11 +34,17 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
     if (doFastBoot) assert(gamePath); // No fast boot without a game!
 
+    scheduler::init();
+
     bus::init(bios7Path, bios9Path, gamePath);
     firmware::init(firmPath);
+
+    ppu::init();
     timer::init();
 
     cpu::interpreter::init();
+
+    scheduler::flush();
 
     if (doFastBoot) {
         std::printf("[MariDS    ] Fast booting \"%s\"\n", gamePath);
@@ -152,10 +160,16 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 
 void run() {
     while (true) {
-        cpu::interpreter::run(&arm9, 16);
-        cpu::interpreter::run(&arm7, 8);
+        const auto runCycles = scheduler::getRunCycles();
 
-        timer::run(8);
+        scheduler::processEvents(runCycles);
+
+        cpu::interpreter::run(&arm9, runCycles);      // 2 CPI
+        cpu::interpreter::run(&arm7, runCycles >> 1); // 2 CPI
+
+        timer::run(runCycles);
+
+        scheduler::flush();
     }
 }
 
