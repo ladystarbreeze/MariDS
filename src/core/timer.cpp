@@ -48,7 +48,13 @@ void checkCascade(int tmID) {
             // Reload counter, trigger interrupt
             tm.ctr = tm.reload;
 
-            if (cnt.irqen) intc::sendInterrupt7((IntSource)(tmID + 3));
+            if (cnt.irqen) {
+                if (tmID < 4) {
+                    intc::sendInterrupt7((IntSource)(tmID + 3));
+                } else {
+                    intc::sendInterrupt9((IntSource)(tmID + 3));
+                }
+            }
 
             // Check previous timer for cascade
             if (tmID > 0) checkCascade(tmID - 1);
@@ -65,7 +71,7 @@ void init() {
 }
 
 void run(i64 runCycles) {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
         auto &tm = timers[i];
 
         auto &cnt = tm.tmcnt;
@@ -81,7 +87,13 @@ void run(i64 runCycles) {
                 // Reload counter, trigger interrupt
                 tm.ctr = tm.reload;
 
-                if (cnt.irqen) intc::sendInterrupt7((IntSource)(i + 3));
+                if (cnt.irqen) {
+                    if (i < 4) {
+                        intc::sendInterrupt7((IntSource)(i + 3));
+                    } else {
+                        intc::sendInterrupt9((IntSource)(i + 3));
+                    }
+                }
 
                 // Check previous timer for cascade
                 if (i > 0) checkCascade(i - 1);
@@ -90,6 +102,38 @@ void run(i64 runCycles) {
             tm.subctr -= tm.prescaler;
         }
     }
+}
+
+u16 read16ARM7(u32 addr) {
+    u16 data;
+
+    const auto tmID = (addr >> 2) & 3;
+
+    auto &tm = timers[tmID];
+
+    switch (addr & ~(3 << 2)) {
+        case static_cast<u32>(TimerReg::TMCNT):
+            std::printf("[Timer:ARM7] Read16 @ TM%uCNT_L\n", tmID);
+            return tm.ctr;
+        case static_cast<u32>(TimerReg::TMCNT_H):
+            {
+                std::printf("[Timer:ARM7] Read16 @ TM%uCNT_H\n", tmID);
+
+                auto &cnt = tm.tmcnt;
+
+                data  = (u16)cnt.prescaler;
+                data |= (u16)cnt.cascade << 2;
+                data |= (u16)cnt.irqen   << 6;
+                data |= (u16)cnt.tmen    << 7;
+            }
+            break;
+        default:
+            std::printf("[Timer:ARM7] Unhandled read16 @ 0x%08X\n", addr);
+            
+            exit(0);
+    }
+
+    return data;
 }
 
 void write16ARM7(u32 addr, u16 data) {
