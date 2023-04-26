@@ -54,6 +54,8 @@ u8 readSPIDATA() {
     switch (spicnt.dev) {
         case SPIDev::Firmware:
             return firmware::read();
+        case SPIDev::TSC:
+            return 0xFF;
         default:
             std::printf("[SPI       ] Unhandled SPI device %s\n", devNames[spicnt.dev]);
 
@@ -82,6 +84,9 @@ void writeSPIDATA(u8 data) {
         switch (spicnt.dev) {
             case SPIDev::Firmware:
                 firmware::write(data);
+                break;
+            case SPIDev::TSC:
+                std::printf("[SPI       ] Unhandled TSC write = 0x%02X\n", data);
                 break;
             default:
                 std::printf("[SPI       ] Unhandled SPI device %s\n", devNames[spicnt.dev]);
