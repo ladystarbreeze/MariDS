@@ -36,7 +36,7 @@ struct DISPSTAT {
 
 std::vector<u8> vram;
 
-DISPSTAT dispstat;
+DISPSTAT dispstat[2];
 
 u16 vcount;
 
@@ -46,9 +46,9 @@ u64 idHBLANK, idScanline;
 void hblankEvent(i64 c) {
     (void)c;
     
-    dispstat.hblank = true; // Technically incorrect, but should be fine for now
+    dispstat[0].hblank = dispstat[1].hblank = true; // Technically incorrect, but should be fine for now
 
-    assert(!dispstat.hirqen);
+    assert(!dispstat[0].hirqen && !dispstat[1].hirqen);
 
     scheduler::addEvent(idHBLANK, 0, CYCLES_PER_SCANLINE);
 }
@@ -56,31 +56,42 @@ void hblankEvent(i64 c) {
 void scanlineEvent(i64 c) {
     (void)c;
 
-    dispstat.hblank = false;
+    dispstat[0].hblank = dispstat[1].hblank = false;
 
     ++vcount;
 
     if (vcount == LINES_PER_VDRAW) {
-        dispstat.vblank = true;
+        dispstat[0].vblank = dispstat[1].vblank = true;
 
-        if (dispstat.virqen) {
+        if (dispstat[0].virqen) {
             intc::sendInterrupt7(IntSource::VBLANK);
+        }
+
+        if (dispstat[1].virqen) {
             intc::sendInterrupt9(IntSource::VBLANK);
         }
 
         update(vram.data());
     } else if (vcount == (LINES_PER_FRAME - 1)) {
-        dispstat.vblank = false; // Is turned off on the last scanline
+        dispstat[0].vblank = dispstat[1].vblank = false; // Is turned off on the last scanline
     } else if (vcount == LINES_PER_FRAME) {
         vcount = 0;
     }
 
-    if (vcount == dispstat.lyc) {
-        dispstat.vcounter = true;
+    if (vcount == dispstat[0].lyc) {
+        dispstat[0].vcounter = true;
 
-        assert(!dispstat.lycirqen);
+        assert(!dispstat[0].lycirqen);
     } else {
-        dispstat.vcounter = false;
+        dispstat[0].vcounter = false;
+    }
+
+    if (vcount == dispstat[1].lyc) {
+        dispstat[1].vcounter = true;
+
+        assert(!dispstat[1].lycirqen);
+    } else {
+        dispstat[1].vcounter = false;
     }
 
     scheduler::addEvent(idScanline, 0, CYCLES_PER_SCANLINE);
@@ -106,25 +117,46 @@ void writeVRAM32(u32 addr, u32 data) {
     std::memcpy(&vram[addr], &data, sizeof(u32));
 }
 
-u16 readDISPSTAT() {
+u16 readDISPSTAT7() {
     u16 data;
 
-    data  = (u16)dispstat.vblank   << 0;
-    data |= (u16)dispstat.hblank   << 1;
-    data |= (u16)dispstat.vcounter << 2;
-    data |= (u16)dispstat.virqen   << 3;
-    data |= (u16)dispstat.hirqen   << 4;
-    data |= (u16)dispstat.lycirqen << 5;
+    data  = (u16)dispstat[0].vblank   << 0;
+    data |= (u16)dispstat[0].hblank   << 1;
+    data |= (u16)dispstat[0].vcounter << 2;
+    data |= (u16)dispstat[0].virqen   << 3;
+    data |= (u16)dispstat[0].hirqen   << 4;
+    data |= (u16)dispstat[0].lycirqen << 5;
     
-    return data | (dispstat.lyc << 7);
+    return data | (dispstat[0].lyc << 7);
 }
 
-void writeDISPSTAT(u16 data) {
-    dispstat.virqen   = data & (1 << 3);
-    dispstat.hirqen   = data & (1 << 4);
-    dispstat.lycirqen = data & (1 << 5);
+u16 readDISPSTAT9() {
+    u16 data;
 
-    dispstat.lyc = data >> 7;
+    data  = (u16)dispstat[1].vblank   << 0;
+    data |= (u16)dispstat[1].hblank   << 1;
+    data |= (u16)dispstat[1].vcounter << 2;
+    data |= (u16)dispstat[1].virqen   << 3;
+    data |= (u16)dispstat[1].hirqen   << 4;
+    data |= (u16)dispstat[1].lycirqen << 5;
+    
+    return data | (dispstat[1].lyc << 7);
+}
+
+void writeDISPSTAT7(u16 data) {
+    dispstat[0].virqen   = data & (1 << 3);
+    dispstat[0].hirqen   = data & (1 << 4);
+    dispstat[0].lycirqen = data & (1 << 5);
+
+    dispstat[0].lyc = data >> 7;
+}
+
+void writeDISPSTAT9(u16 data) {
+    dispstat[1].virqen   = data & (1 << 3);
+    dispstat[1].hirqen   = data & (1 << 4);
+    dispstat[1].lycirqen = data & (1 << 5);
+
+    dispstat[1].lyc = data >> 7;
 }
 
 }

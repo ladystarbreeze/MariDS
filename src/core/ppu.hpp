@@ -14,8 +14,10 @@ void init();
 void writeVRAM16(u32 addr, u16 data);
 void writeVRAM32(u32 addr, u32 data);
 
-u16 readDISPSTAT();
+u16 readDISPSTAT7();
+u16 readDISPSTAT9();
 
-void writeDISPSTAT(u16 data);
+void writeDISPSTAT7(u16 data);
+void writeDISPSTAT9(u16 data);
 
 }
