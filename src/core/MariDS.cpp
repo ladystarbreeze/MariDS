@@ -12,6 +12,7 @@
 #include "bus.hpp"
 #include "cartridge.hpp"
 #include "firmware.hpp"
+#include "ipc.hpp"
 #include "ppu.hpp"
 #include "scheduler.hpp"
 #include "timer.hpp"
@@ -72,6 +73,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
     bus::init(bios7Path, bios9Path, gamePath);
     firmware::init(firmPath);
 
+    ipc::init();
     ppu::init();
     timer::init();
 
@@ -154,7 +156,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
             arm9Start += 0x800;
         }
 
-        if (arm9Offset & 0xFFF) arm9Offset = (arm9Offset | 0xFFF) + 1; // Round up ARM9 binary offset
+        //if (arm9Offset & 0xFFF) arm9Offset = (arm9Offset | 0xFFF) + 1; // Round up ARM9 binary offset
 
         //assert(inRange(arm9Entry, 0x02000000, 0x3BFE00));
         //assert(inRange(arm9Addr , 0x02000000, 0x3BFE00));
