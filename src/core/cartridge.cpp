@@ -161,6 +161,26 @@ u32 read32ARM7(u32 addr) {
     return data;
 }
 
+u32 read32ARM9(u32 addr) {
+    u32 data;
+
+    switch (addr) {
+        case static_cast<u32>(CartReg::ROMCTRL):
+            std::printf("[Cart:ARM9 ] Read32 @ ROMCTRL\n");
+
+            data  = (u32)romctrl.drq  << 23;
+            data |= (u32)romctrl.resb << 29;
+            data |= (u32)romctrl.busy << 31;
+            break;
+        default:
+            std::printf("[Cart:ARM9 ] Unhandled read32 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+
+    return data;
+}
+
 void write8ARM7(u32 addr, u8 data) {
     switch (addr) {
         case static_cast<u32>(CartReg::AUXSPICNT) + 1:
@@ -223,6 +243,73 @@ void write32ARM7(u32 addr, u32 data) {
             break;
         default:
             std::printf("[Cart:ARM7 ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
+
+            exit(0);
+    }
+}
+
+void write8ARM9(u32 addr, u8 data) {
+    switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT) + 1:
+            std::printf("[Cart:ARM9 ] Write8 @ AUXSPICNT_HI = 0x%02X\n", data);
+            break;
+        case static_cast<u32>(CartReg::ROMCMD) + 0:
+        case static_cast<u32>(CartReg::ROMCMD) + 1:
+        case static_cast<u32>(CartReg::ROMCMD) + 2:
+        case static_cast<u32>(CartReg::ROMCMD) + 3:
+        case static_cast<u32>(CartReg::ROMCMD) + 4:
+        case static_cast<u32>(CartReg::ROMCMD) + 5:
+        case static_cast<u32>(CartReg::ROMCMD) + 6:
+        case static_cast<u32>(CartReg::ROMCMD) + 7:
+            {
+                const auto i = addr & 7;
+
+                std::printf("[Cart:ARM9 ] Write8 @ ROMCMD[%u] = 0x%02X\n", i, data);
+
+                romcmd &= ~(0xFFull << (56 - (8 * i)));
+                romcmd |= (u64)data << (56 - (8 * i));
+            }
+            break;
+        default:
+            std::printf("[Cart:ARM9 ] Unhandled write8 @ 0x%08X = 0x%02X\n", addr, data);
+
+            exit(0);
+    }
+}
+
+void write16ARM9(u32 addr, u16 data) {
+    switch (addr) {
+        case static_cast<u32>(CartReg::ROMSEED0_H):
+            std::printf("[Cart:ARM9 ] Write16 @ ROMSEED0_HI = 0x%04X\n", data);
+            break;
+        case static_cast<u32>(CartReg::ROMSEED1_H):
+            std::printf("[Cart:ARM9 ] Write16 @ ROMSEED1_HI = 0x%04X\n", data);
+            break;
+        default:
+            std::printf("[Cart:ARM9 ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
+
+            exit(0);
+    }
+}
+
+void write32ARM9(u32 addr, u32 data) {
+    switch (addr) {
+        case static_cast<u32>(CartReg::ROMCTRL):
+            std::printf("[Cart:ARM9 ] Write32 @ ROMCTRL = 0x%08X\n", data);
+
+            romctrl.resb = romctrl.resb || (data & (1 << 29));
+            romctrl.busy = data & (1 << 31);
+
+            if (romctrl.busy) doCmd();
+            break;
+        case static_cast<u32>(CartReg::ROMSEED0_L):
+            std::printf("[Cart:ARM7 ] Write9 @ ROMSEED0_LO = 0x%08X\n", data);
+            break;
+        case static_cast<u32>(CartReg::ROMSEED1_L):
+            std::printf("[Cart:ARM7 ] Write9 @ ROMSEED1_LO = 0x%08X\n", data);
+            break;
+        default:
+            std::printf("[Cart:ARM7 ] Unhandled write9 @ 0x%08X = 0x%08X\n", addr, data);
 
             exit(0);
     }
