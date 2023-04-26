@@ -33,7 +33,9 @@ enum class Memory7Base : u32 {
     IPC   = 0x04000180,
     Cart  = 0x040001A0,
     INTC  = 0x04000208,
+    Sound = 0x04000400,
     MMIO  = 0x04000000,
+    WiFi  = 0x04808000,
 };
 
 /* ARM7 memory limits */
@@ -42,6 +44,8 @@ enum class Memory7Limit : u32 {
     Main  = 0x00400000,
     SWRAM = 0x00008000,
     WRAM  = 0x00010000,
+    Sound = 0x00000120,
+    WiFi  = 0x00001000,
 };
 
 /* ARM9 base addresses */
@@ -55,6 +59,7 @@ enum class Memory9Base : u32 {
     DISPA = 0x04000000,
     DMA   = 0x040000B0,
     Timer = 0x04000100,
+    Cart  = 0x040001A0,
     INTC  = 0x04000208,
     Math  = 0x04000280,
     DISPB = 0x04001000,
@@ -179,6 +184,10 @@ u8 read8ARM7(u32 addr) {
         return swram7[addr & swramLimit7];
     } else if (inRange(addr, static_cast<u32>(Memory7Base::WRAM), 16 * 8 * static_cast<u32>(Memory7Limit::WRAM))) {
         return wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)];
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Sound), static_cast<u32>(Memory7Limit::Sound))) {
+        std::printf("[Bus:ARM7  ] Unhandled read8 @ 0x%08X (Sound)\n", addr);
+
+        return 0;
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x138:
@@ -213,21 +222,40 @@ u16 read16ARM7(u32 addr) {
         std::memcpy(&data, &wram[addr & (static_cast<u32>(Memory7Limit::WRAM) - 1)], sizeof(u16));
     } else if (inRange(addr, static_cast<u32>(Memory7Base::DMA), 0x30)) {
         return dma::read16ARM7(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Timer), 0x10)) {
+        return timer::read16ARM7(addr);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
         return ipc::read16ARM7(addr);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::read16ARM7(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::GBA0), static_cast<u32>(Memory9Limit::GBA0))) {
+        return 0;
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 4:
                 //std::printf("[Bus:ARM7  ] Read16 @ DISPSTAT\n");
-                return ppu::readDISPSTAT();
+                return ppu::readDISPSTAT7();
             case static_cast<u32>(Memory9Base::MMIO) + 0x130:
                 //std::printf("[Bus:ARM7  ] Read16 @ KEYINPUT\n");
                 return getKEYINPUT();
+            case static_cast<u32>(Memory9Base::MMIO) + 0x134:
+                std::printf("[Bus:ARM7  ] Read16 @ RCNT\n");
+                return 0x8000;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x138:
+                std::printf("[Bus:ARM7  ] Read16 @ RTC\n");
+                return 0;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
+                std::printf("[SPI       ] Read16 @ SPICNT\n");
+                return spi::readSPICNT();
+            case static_cast<u32>(Memory9Base::MMIO) + 0x1C2:
+                std::printf("[SPI       ] Read16 @ SPIDATA\n");
+                return spi::readSPIDATA();
             case static_cast<u32>(Memory9Base::MMIO) + 0x300:
                 std::printf("[Bus:ARM7  ] Read16 @ POSTFLG\n");
                 return postflg7;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x304:
+                std::printf("[Bus:ARM7  ] Read16 @ POWCNT2\n");
+                return 0;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read16 @ 0x%08X\n", addr);
 
@@ -261,7 +289,10 @@ u32 read32ARM7(u32 addr) {
                 std::printf("[SPI       ] Read32 @ SPICNT\n"); // And SPIDATA??
                 //return (u32)spi::readSPICNT() | ((u32)spi::readSPIDATA() << 16);
                 return spi::readSPICNT();
-            case 0x04100010:
+            case static_cast<u32>(Memory9Base::MMIO) + 0x100000:
+                std::printf("[Bus:ARM7  ] Read32 @ IPCFIFORECV\n");
+                return ipc::readRECV7();
+            case static_cast<u32>(Memory9Base::MMIO) + 0x100010:
                 return cartridge::readROMDATA();
             default:
                 std::printf("[Bus:ARM7  ] Unhandled read32 @ 0x%08X\n", addr);
@@ -304,7 +335,7 @@ u16 read16ARM9(u32 addr) {
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DISPA), 0x70)) {
         if (addr == (static_cast<u32>(Memory9Base::MMIO) + 4)) {
             //std::printf("[Bus:ARM9  ] Read16 @ DISPSTAT\n");
-            return ppu::readDISPSTAT();
+            return ppu::readDISPSTAT9();
         } else {
             std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X (Display Engine A)\n", addr);
 
@@ -360,6 +391,8 @@ u32 read32ARM9(u32 addr) {
         std::memcpy(&data, &mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], sizeof(u32));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DMA), 0x40)) {
         return dma::read32ARM9(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::Cart), 0x1C)) {
+        return cartridge::read32ARM9(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::read32ARM9(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Math), 0x40)) {
@@ -381,6 +414,9 @@ u32 read32ARM9(u32 addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x4008:
                 std::printf("[Bus:ARM9  ] Read32 @ SCFG_EXT9\n");
                 return 0;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x100000:
+                std::printf("[Bus:ARM9  ] Read32 @ IPCFIFORECV\n");
+                return ipc::readRECV9();
             default:
                 std::printf("[Bus:ARM9  ] Unhandled read32 @ 0x%08X\n", addr);
 
@@ -404,6 +440,10 @@ void write8ARM7(u32 addr, u8 data) {
         return cartridge::write8ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::write8ARM7(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Sound), static_cast<u32>(Memory7Limit::Sound))) {
+        std::printf("[Bus:ARM7  ] Unhandled write8 @ 0x%08X (Sound) = 0x%02X\n", addr, data);
+
+        return;
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x138:
@@ -444,14 +484,31 @@ void write16ARM7(u32 addr, u16 data) {
         return ipc::write16ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::write16ARM7(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::WiFi), static_cast<u32>(Memory7Limit::WiFi))) {
+        std::printf("[Bus:ARM7  ] Unhandled write16 @ 0x%08X (Wi-Fi) = 0x%04X\n", addr, data);
     } else {
         switch (addr) {
+            case static_cast<u32>(Memory9Base::MMIO) + 4:
+                std::printf("[Bus:ARM7  ] Write16 @ DISPSTAT = 0x%04X\n", data);
+                return ppu::writeDISPSTAT7(data);
+            case static_cast<u32>(Memory9Base::MMIO) + 0x134:
+                std::printf("[Bus:ARM7  ] Write16 @ RCNT = 0x%04X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x138:
+                std::printf("[Bus:ARM7  ] Write16 @ RTC = 0x%04X\n", data);
+                break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C0:
                 std::printf("[SPI       ] Write16 @ SPICNT = 0x%04X\n", data);
                 return spi::writeSPICNT(data);
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C2:
                 std::printf("[SPI       ] Write16 @ SPIDATA = 0x%04X\n", data);
                 return spi::writeSPIDATA(data);
+            case static_cast<u32>(Memory9Base::MMIO) + 0x206:
+                std::printf("[Bus:ARM7  ] Write16 @ WIFIWAITCNT = 0x%04X\n", data);
+                break;
+            case static_cast<u32>(Memory9Base::MMIO) + 0x304:
+                std::printf("[Bus:ARM7  ] Write16 @ POWCNT2 = 0x%04X\n", data);
+                break;
             default:
                 std::printf("[Bus:ARM7  ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
 
@@ -475,10 +532,13 @@ void write32ARM7(u32 addr, u32 data) {
         return timer::write32ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
         return cartridge::write32ARM7(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
+        return ipc::write32ARM7(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::INTC), 0x10)) {
         return intc::write32ARM7(addr, data);
     } else {
         switch (addr) {
+            case 0x08005500: break; // For rockwrestler
             default:
                 std::printf("[Bus:ARM7  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
 
@@ -490,6 +550,8 @@ void write32ARM7(u32 addr, u32 data) {
 void write8ARM9(u32 addr, u8 data) {
     if (inRange(addr, static_cast<u32>(Memory9Base::Main), 4 * static_cast<u32>(Memory9Limit::Main))) {
         mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)] = data;
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::write8ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::write8ARM9(addr, data);
     } else {
@@ -541,11 +603,11 @@ void write16ARM9(u32 addr, u16 data) {
         std::memcpy(&mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)], &data, sizeof(u16));
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DISPA), 0x70)) {
         if (addr == (static_cast<u32>(Memory9Base::DISPA) + 4)) {
-            std::printf("[Bus:ARM9  ] Write16 @ DISPSTAT = 0x%08X\n", data);
+            std::printf("[Bus:ARM9  ] Write16 @ DISPSTAT = 0x%04X\n", data);
 
-            return ppu::writeDISPSTAT(data);
+            return ppu::writeDISPSTAT9(data);
         } else {
-            std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X (Display Engine A) = 0x%08X\n", addr, data);
+            std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X (Display Engine A) = 0x%04X\n", addr, data);
         }
     } else if (inRange(addr, static_cast<u32>(Memory7Base::DMA), 0x30)) {
         return dma::write16ARM9(addr, data);
@@ -553,6 +615,8 @@ void write16ARM9(u32 addr, u16 data) {
         return timer::write16ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) { // Same memory base as ARM7
         return ipc::write16ARM9(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::write16ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::write16ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Math), 0x40)) {
@@ -590,6 +654,10 @@ void write32ARM9(u32 addr, u32 data) {
         std::printf("[Bus:ARM9  ] Unhandled write32 @ 0x%08X (Display Engine A) = 0x%08X\n", addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DMA), 0x40)) {
         return dma::write32ARM9(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::IPC), 0x10)) {
+        return ipc::write32ARM9(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::Cart), 0x1C)) {
+        return cartridge::write32ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::write32ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Math), 0x40)) {
