@@ -6,6 +6,7 @@
 #include "math.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -28,11 +29,26 @@ struct DIVCNT {
     bool div0, busy;
 };
 
+struct SQRTCNT {
+    bool sqrtmode;
+    bool busy;
+};
+
+// DIV unit
+
 DIVCNT divcnt;
 
 u32 numer[2], denom[2];
 
 u32 div[2], rem[2];
+
+// SQRT unit
+
+SQRTCNT sqrtcnt;
+
+u32 param[2];
+
+u32 result;
 
 void doDiv() {
     switch (divcnt.divmode) {
@@ -132,7 +148,19 @@ void doDiv() {
 
     divcnt.div0 = !denom[0] && !denom[1];
 
-    std::printf("DIV = 0x%08X%08X, REM = 0x%08X%08X\n", div[1], div[0], rem[1], rem[0]);
+    //std::printf("DIV = 0x%08X%08X, REM = 0x%08X%08X\n", div[1], div[0], rem[1], rem[0]);
+}
+
+void doSqrt() {
+    if (sqrtcnt.sqrtmode) { // 64-bit
+        u64 n;
+
+        std::memcpy(&n, param, 8);
+
+        result = std::sqrt((double)n);
+    } else { // 32-bit
+        result = std::sqrt((double)param[0]);
+    }
 }
 
 u16 read16(u32 addr) {
@@ -146,6 +174,12 @@ u16 read16(u32 addr) {
             data |= (u16)divcnt.div0 << 14;
             data |= (u16)divcnt.busy << 15;
             break;
+        case static_cast<u32>(MathReg::SQRTCNT):
+            std::printf("[Math      ] Read16 @ SQRTCNT\n");
+
+            data  = (u16)sqrtcnt.sqrtmode;
+            data |= (u16)sqrtcnt.busy << 15;
+            break;
         default:
             std::printf("[Math      ] Unhandled read32 @ 0x%08X\n", addr);
 
@@ -157,6 +191,18 @@ u16 read16(u32 addr) {
 
 u32 read32(u32 addr) {
     switch (addr) {
+        case static_cast<u32>(MathReg::DIVNUMER):
+            std::printf("[Math      ] Read32 @ DIV_NUMER_L\n");
+            return numer[0];
+        case static_cast<u32>(MathReg::DIVNUMER) + 4:
+            std::printf("[Math      ] Read32 @ DIV_NUMER_H\n");
+            return numer[1];
+        case static_cast<u32>(MathReg::DIVDENOM):
+            std::printf("[Math      ] Read32 @ DIV_DENOM_L\n");
+            return denom[0];
+        case static_cast<u32>(MathReg::DIVDENOM) + 4:
+            std::printf("[Math      ] Read32 @ DIV_DENOM_H\n");
+            return denom[1];
         case static_cast<u32>(MathReg::DIVRESULT):
             std::printf("[Math      ] Read32 @ DIV_RESULT_L\n");
             return div[0];
@@ -169,6 +215,15 @@ u32 read32(u32 addr) {
         case static_cast<u32>(MathReg::REMRESULT) + 4:
             std::printf("[Math      ] Read32 @ REM_RESULT_H\n");
             return rem[1];
+        case static_cast<u32>(MathReg::SQRTRESULT):
+            std::printf("[Math      ] Read32 @ SQRT_RESULT\n");
+            return result;
+        case static_cast<u32>(MathReg::SQRTPARAM):
+            std::printf("[Math      ] Read32 @ SQRT_PARAM_L\n");
+            return param[0];
+        case static_cast<u32>(MathReg::SQRTPARAM) + 4:
+            std::printf("[Math      ] Read32 @ SQRT_PARAM_H\n");
+            return param[1];
         default:
             std::printf("[Math      ] Unhandled read32 @ 0x%08X\n", addr);
 
@@ -184,6 +239,13 @@ void write16(u32 addr, u16 data) {
             divcnt.divmode = data & 3;
 
             doDiv();
+            break;
+        case static_cast<u32>(MathReg::SQRTCNT):
+            std::printf("[Math      ] Write16 @ SQRTCNT = 0x%04X\n", data);
+
+            sqrtcnt.sqrtmode = data & 1;
+
+            doSqrt();
             break;
         default:
             std::printf("[Math      ] Unhandled write16 @ 0x%08X = 0x%04X\n", addr, data);
@@ -221,6 +283,20 @@ void write32(u32 addr, u32 data) {
             denom[1] = data;
 
             doDiv();
+            break;
+        case static_cast<u32>(MathReg::SQRTPARAM):
+            std::printf("[Math      ] Write32 @ SQRT_PARAM_L = 0x%08X\n", data);
+
+            param[0] = data;
+
+            doSqrt();
+            break;
+        case static_cast<u32>(MathReg::SQRTPARAM) + 4:
+            std::printf("[Math      ] Write32 @ SQRT_PARAM_H = 0x%08X\n", data);
+
+            param[1] = data;
+
+            doSqrt();
             break;
         default:
             std::printf("[Math      ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
