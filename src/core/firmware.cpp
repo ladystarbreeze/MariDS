@@ -14,18 +14,22 @@ namespace nds::firmware {
 
 enum FirmCmd {
     READ = 0x03,
-    BLAH = 0xFF,
+    RDSR = 0x05,
 };
 
 enum FirmState {
     Idle,
     GetAddress,
     Read,
+    ReadStatus,
 };
 
 std::vector<u8> firm;
 
 FirmState firmState;
+
+bool wip; // Write In Progress
+bool wel; // Write Enable Latch
 
 u8 firmCmd;
 
@@ -38,6 +42,8 @@ void init(const char *firmPath) {
 
     assert(firm.size());
 
+    wip = wel = false;
+
     std::printf("[Firmware  ] OK!\n");
 
     firmState = FirmState::Idle;
@@ -48,9 +54,21 @@ void release() { // After chip select is cleared
 }
 
 u8 read() {
-    if (firmState != FirmState::Read) return 0;
+    u8 data;
 
-    return firm[firmAddr++];
+    switch (firmState) {
+        case FirmState::Read:
+            return firm[firmAddr++];
+        case FirmState::ReadStatus:
+            data  = (u8)wip;
+            data |= (u8)wel << 1;
+            break;
+        default:
+            data = 0;
+            break;
+    }
+    
+    return data;
 }
 
 void write(u8 data) {
@@ -69,6 +87,11 @@ void write(u8 data) {
                     firmAddr = 0;
 
                     argLen = 3;
+                    break;
+                case FirmCmd::RDSR:
+                    std::printf("[Firmware  ] RDSR\n");
+
+                    firmState = FirmState::ReadStatus;
                     break;
                 default:
                     std::printf("[Firmware  ] Unhandled command 0x%02X\n", firmCmd);
@@ -91,6 +114,8 @@ void write(u8 data) {
                         exit(0);
                 }
             }
+            break;
+        default:
             break;
     }
 }
