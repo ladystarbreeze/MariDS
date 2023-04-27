@@ -26,6 +26,7 @@ enum CP15Reg {
     IICL     = 0x0751,
     IDC      = 0x0760,
     IDCL     = 0x0761,
+    CDCL     = 0x07A1,
     DWB      = 0x07A4,
     CIDC     = 0x07E1,
     DTCMSize = 0x0910,
@@ -132,6 +133,9 @@ void CP15::set(u32 idx, u32 data) {
             break;
         case CP15Reg::IDCL:
             std::printf("[ARM9:CP15 ] Invalidate data cache line 0x%08X\n", data);
+            break;
+        case CP15Reg::CDCL:
+            std::printf("[ARM9:CP15 ] Clean data cache line 0x%08X\n", data);
             break;
         case CP15Reg::DWB:
             std::printf("[ARM9:CP15 ] Drain write buffer\n");
