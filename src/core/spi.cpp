@@ -52,6 +52,8 @@ u8 readSPIDATA() {
     if (!spicnt.spien || !spicnt.chipselect) return 0;
 
     switch (spicnt.dev) {
+        case SPIDev::PowerManagement:
+            return 0xFF;
         case SPIDev::Firmware:
             return firmware::read();
         case SPIDev::TSC:
@@ -82,6 +84,9 @@ void writeSPICNT(u16 data) {
 void writeSPIDATA(u8 data) {
     if (spicnt.spien && spicnt.chipselect) {
         switch (spicnt.dev) {
+            case SPIDev::PowerManagement:
+                std::printf("[SPI       ] Unhandled Power Management write = 0x%02X\n", data);
+                break;
             case SPIDev::Firmware:
                 firmware::write(data);
                 break;
