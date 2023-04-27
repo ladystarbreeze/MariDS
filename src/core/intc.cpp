@@ -44,6 +44,8 @@ void checkInterrupt7() {
         unhaltCPU(7);
 
         setIRQPending(7, ime7);
+    } else {
+        setIRQPending(7, false);
     }
 }
 
@@ -52,6 +54,8 @@ void checkInterrupt9() {
         unhaltCPU(9);
 
         setIRQPending(9, ime9);
+    } else {
+        setIRQPending(9, false);
     }
 }
 
