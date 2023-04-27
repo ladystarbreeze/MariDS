@@ -815,8 +815,6 @@ void aExtraLoad(CPU *cpu, u32 instr) {
 /* ARM state LDM/STM */
 template<bool isP, bool isU, bool isS, bool isW, bool isL>
 void aLoadMultiple(CPU *cpu, u32 instr) {
-    assert(isL || !isS);
-
     // Get operands
     const auto rn = (instr >> 16) & 0xF;
 
@@ -855,8 +853,8 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
 
     CPUMode mode;
 
-    if constexpr (isL && isS) {
-        if (!(reglist & (1 << 15))) {
+    if constexpr (isS) {
+        if (!isL || !(reglist & (1 << 15))) {
             mode = cpu->cpsr.mode;
 
             cpu->changeMode(CPUMode::USR); // User mode transfer
@@ -915,7 +913,7 @@ void aLoadMultiple(CPU *cpu, u32 instr) {
         rlist ^= 1 << i;
     }
 
-    if constexpr (isL && isS) cpu->changeMode(mode); // Restore old mode/set new mode
+    if constexpr (isS) cpu->changeMode(mode); // Restore old mode/set new mode
 
     if constexpr (isW) {
         if constexpr (!isU) addr -= 4 * std::__popcount(reglist); // Calculate lowest base address
@@ -1032,11 +1030,13 @@ void aMultiply(CPU *cpu, u32 instr) {
 
     assert((rd != CPUReg::PC) && (rm != CPUReg::PC) && (rn != CPUReg::PC) && (rs != CPUReg::PC));
 
-    cpu->r[rd] = cpu->r[rm] * cpu->r[rs];
+    auto res = cpu->r[rm] * cpu->r[rs];
 
     if constexpr (isA) {
-        cpu->r[rd] += cpu->r[rn];
+        res += cpu->r[rn];
     }
+
+    cpu->r[rd] = res;
 
     if constexpr (isS) {
         cpu->cout = cpu->cpsr.c; // ARMv5 keeps C untouched
