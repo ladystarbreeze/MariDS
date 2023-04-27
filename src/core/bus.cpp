@@ -36,6 +36,7 @@ enum class Memory7Base : u32 {
     Sound = 0x04000400,
     MMIO  = 0x04000000,
     WiFi  = 0x04808000,
+    VRAM  = 0x06000000,
 };
 
 /* ARM7 memory limits */
@@ -46,6 +47,7 @@ enum class Memory7Limit : u32 {
     WRAM  = 0x00010000,
     Sound = 0x00000120,
     WiFi  = 0x00001000,
+    VRAM  = 0x00040000,
 };
 
 /* ARM9 base addresses */
@@ -103,7 +105,6 @@ std::vector<u8> swram;
 // Registers
 
 u8 wramcnt;
-u8 vramcnt[9];
 u8 postflg7, postflg9;
 
 u16 exmem7, exmem9;
@@ -202,6 +203,9 @@ u8 read8ARM7(u32 addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x1C2:
                 std::printf("[SPI       ] Read8 @ SPIDATA\n");
                 return spi::readSPIDATA();
+            case static_cast<u32>(Memory9Base::MMIO) + 0x240:
+                std::printf("[Bus:ARM7  ] Read8 @ VRAMSTAT\n");
+                return ppu::readVRAMSTAT();
             case static_cast<u32>(Memory9Base::MMIO) + 0x300:
                 std::printf("[Bus:ARM7  ] Read8 @ POSTFLG\n");
                 return postflg7;
@@ -305,6 +309,8 @@ u32 read32ARM7(u32 addr) {
         std::printf("[Bus:ARM7  ] Unhandled read32 @ 0x%08X (Sound)\n", addr);
 
         return 0;
+    } else if (inRange(addr, static_cast<u32>(Memory7Base::VRAM), static_cast<u32>(Memory7Limit::VRAM))) {
+        return ppu::readWRAM32(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::GBA0), static_cast<u32>(Memory9Limit::GBA0))) {
         return 0;
     } else {
@@ -333,8 +339,10 @@ u8 read8ARM9(u32 addr) {
         return mainMem[addr & (static_cast<u32>(Memory9Limit::Main) - 1)];
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::read32ARM9(addr);
-    } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), 2 * static_cast<u32>(Memory9Limit::VRAM))) {
-        return 0;
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), static_cast<u32>(Memory9Limit::VRAM))) {
+        return ppu::readVRAM8(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
+        return ppu::readLCDC8(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::GBA0), static_cast<u32>(Memory9Limit::GBA0))) {
         return 0;
     } else {
@@ -380,6 +388,10 @@ u16 read16ARM9(u32 addr) {
         std::printf("[Bus:ARM9  ] Unhandled read16 @ 0x%08X (Display Engine B)\n", addr);
 
         return 0;
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), static_cast<u32>(Memory9Limit::VRAM))) {
+        return ppu::readVRAM16(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
+        return ppu::readLCDC16(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::GBA0), static_cast<u32>(Memory9Limit::GBA0))) {
         return 0;
     } else if (addr >= static_cast<u32>(Memory9Base::BIOS)) {
@@ -445,7 +457,9 @@ u32 read32ARM9(u32 addr) {
 
         return 0;
     } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), static_cast<u32>(Memory9Limit::VRAM))) {
-        return 0;
+        return ppu::readVRAM32(addr);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
+        return ppu::readLCDC32(addr);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::GBA0), static_cast<u32>(Memory9Limit::GBA0))) {
         return 0;
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DTCM1), static_cast<u32>(Memory9Limit::DTCM))) {
@@ -457,7 +471,10 @@ u32 read32ARM9(u32 addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x240:
                 std::printf("[Bus:ARM9  ] Read32 @ VRAMCNT_A/B/C/D\n");
 
-                std::memcpy(&data, vramcnt, sizeof(u32));
+                data  = (u32)ppu::readVRAMCNT(0);
+                data |= (u32)ppu::readVRAMCNT(1) <<  8;
+                data |= (u32)ppu::readVRAMCNT(2) << 16;
+                data |= (u32)ppu::readVRAMCNT(3) << 24;
                 break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x4000:
                 std::printf("[Bus:ARM9  ] Read32 @ SCFG_A9ROM\n");
@@ -620,6 +637,8 @@ void write8ARM9(u32 addr, u8 data) {
         return cartridge::write8ARM9(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::INTC), 0x10)) {
         return intc::write8ARM9(addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), static_cast<u32>(Memory9Limit::VRAM))) {
+        // Unsupported
     } else {
         switch (addr) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x240:
@@ -634,7 +653,7 @@ void write8ARM9(u32 addr, u8 data) {
 
                     std::printf("[Bus:ARM9  ] Write8 @ VRAMCNT_%c = 0x%02X\n", 'A' + idx, data);
 
-                    vramcnt[idx] = data;
+                    ppu::writeVRAMCNT(idx, data);
                 }
                 break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x247:
@@ -648,8 +667,8 @@ void write8ARM9(u32 addr, u8 data) {
                     const auto idx = 7 + (addr - (static_cast<u32>(Memory9Base::MMIO) + 0x248));
 
                     std::printf("[Bus:ARM9  ] Write8 @ VRAMCNT_%c = 0x%02X\n", 'A' + idx, data);
-
-                    vramcnt[idx] = data;
+                    
+                    ppu::writeVRAMCNT(idx, data);
                 }
                 break;
             default:
@@ -689,8 +708,10 @@ void write16ARM9(u32 addr, u16 data) {
         return math::write16(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DISPB), 0x70)) {
         std::printf("[Bus:ARM9  ] Unhandled write16 @ 0x%08X (Display Engine B) = 0x%04X\n", addr, data);
+    } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), static_cast<u32>(Memory9Limit::VRAM))) {
+        ppu::writeVRAM16(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
-        ppu::writeVRAM16(addr - static_cast<u32>(Memory9Base::LCDC), data);
+        ppu::writeLCDC16(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::OAM), static_cast<u32>(Memory9Limit::Pal))) {
         // TODO: implement object attribute memory writes
     } else {
@@ -703,9 +724,8 @@ void write16ARM9(u32 addr, u16 data) {
                 break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x248:
                 std::printf("[Bus:ARM9  ] Write16 @ VRAMCNT_H/I = 0x%04X\n", data);
-
-                vramcnt[7] = data;
-                vramcnt[8] = data >> 8;
+                ppu::writeVRAMCNT(7, data);
+                ppu::writeVRAMCNT(8, data >> 8);
                 break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x304:
                 std::printf("[Bus:ARM9  ] Write16 @ POWCNT1 = 0x%04X\n", data);
@@ -746,9 +766,9 @@ void write32ARM9(u32 addr, u32 data) {
     } else if (inRange(addr, static_cast<u32>(Memory9Base::Pal), static_cast<u32>(Memory9Limit::Pal))) {
         // TODO: implement palette writes
     } else if (inRange(addr, static_cast<u32>(Memory9Base::VRAM), static_cast<u32>(Memory9Limit::VRAM))) {
-        ppu::writeVRAM32(addr & (static_cast<u32>(Memory9Base::LCDC) - 1), data);
+        ppu::writeVRAM32(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::LCDC), static_cast<u32>(Memory9Limit::LCDC))) {
-        ppu::writeVRAM32(addr - static_cast<u32>(Memory9Base::LCDC), data);
+        ppu::writeLCDC32(addr, data);
     } else if (inRange(addr, static_cast<u32>(Memory9Base::OAM), static_cast<u32>(Memory9Limit::Pal))) {
         // TODO: implement object attribute memory writes
     } else if (inRange(addr, static_cast<u32>(Memory9Base::DTCM1), static_cast<u32>(Memory9Limit::DTCM))) {
@@ -764,7 +784,10 @@ void write32ARM9(u32 addr, u32 data) {
             case static_cast<u32>(Memory9Base::MMIO) + 0x240:
                 std::printf("[Bus:ARM9  ] Write32 @ VRAMCNT_A/B/C/D = 0x%08X\n", data);
 
-                std::memcpy(vramcnt, &data, sizeof(u32));
+                ppu::writeVRAMCNT(0, data);
+                ppu::writeVRAMCNT(1, data >>  8);
+                ppu::writeVRAMCNT(2, data >> 16);
+                ppu::writeVRAMCNT(3, data >> 24);
                 break;
             case static_cast<u32>(Memory9Base::MMIO) + 0x304:
                 std::printf("[Bus:ARM9  ] Write32 @ POWCNT1 = 0x%08X\n", data);
