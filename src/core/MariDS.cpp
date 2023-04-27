@@ -41,7 +41,7 @@ SDL_Texture *texture;
 
 SDL_Event e;
 
-u16 keyinput = -1;
+u32 keyinput = -1;
 
 bool isRunning = true;
 
@@ -198,6 +198,8 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
         arm7.setEntry(arm7Entry);
         arm9.setEntry(arm9Entry);
 
+        cartridge::setKEY2();
+
         bus::setPOSTFLG(1);
     }
 
@@ -223,9 +225,13 @@ void update(const u8 *fb) {
                 if (keyState[SDL_GetScancodeFromKey(SDLK_s)]) keyinput |= 1 << 7; // DOWN
                 if (keyState[SDL_GetScancodeFromKey(SDLK_e)]) keyinput |= 1 << 8; // R
                 if (keyState[SDL_GetScancodeFromKey(SDLK_q)]) keyinput |= 1 << 9; // L
+                if (keyState[SDL_GetScancodeFromKey(SDLK_f)]) keyinput |= 1 << 16; // X
+                if (keyState[SDL_GetScancodeFromKey(SDLK_t)]) keyinput |= 1 << 17; // Y
                 break;
         }
     }
+
+    keyinput |= 1 << 23; // Hinge open
 
     keyinput = ~keyinput;
 
@@ -234,7 +240,7 @@ void update(const u8 *fb) {
     SDL_RenderPresent(renderer);
 }
 
-u16 getKEYINPUT() {
+u32 getKEYINPUT() {
     return keyinput;
 }
 

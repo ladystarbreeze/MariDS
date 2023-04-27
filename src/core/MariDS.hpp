@@ -13,7 +13,7 @@ void init(const char *bios7Path, const char *bios9Path, const char *firmPath, co
 void run();
 void update(const u8 *fb);
 
-u16 getKEYINPUT();
+u32 getKEYINPUT();
 
 void haltCPU(int cpuID);
 void unhaltCPU(int cpuID);
