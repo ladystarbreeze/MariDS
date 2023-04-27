@@ -725,8 +725,6 @@ void write32ARM9(u32 addr, u32 data) {
             default:
                 std::printf("[Bus:ARM9  ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
 
-                saveBinary("main_mem.bin", mainMem.data(), mainMem.size());
-
                 exit(0);
         }
     }
