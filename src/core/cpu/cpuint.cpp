@@ -193,6 +193,13 @@ void setSubFlags(CPU *cpu, u32 a, u32 b, u32 c) {
     cpu->cpsr.v = ((a ^ b) & (1 << 31)) && ((a ^ c) & (1 << 31)); // Signed overflow if a & b have different signs, and a & c have different signs
 }
 
+/* Sets SMLAxy/SMLAWy flags */
+void setSMLAFlags(CPU *cpu, u32 a, u32 b, u32 c) {
+    const auto q = !((a ^ b) & (1 << 31)) && ((a ^ c) & (1 << 31)); // Signed overflow if a & b have the same sign sign, and a & c have different signs
+    
+    cpu->cpsr.q = cpu->cpsr.q || q; // Sticky
+}
+
 // Barrel shifter
 
 /* Performs an arithmetic right shift */
@@ -750,10 +757,12 @@ void aExtraLoad(CPU *cpu, u32 instr) {
         case ExtraLoadOpcode::STRH:
             assert(rd != CPUReg::PC);
 
-            cpu->write16(addr, data);
+            cpu->write16(addr & ~1, data);
             break;
         case ExtraLoadOpcode::LDRH:
             assert(rd != CPUReg::PC);
+
+            assert(!(addr & 1));
 
             cpu->r[rd] = cpu->read16(addr);
             break;
@@ -761,6 +770,13 @@ void aExtraLoad(CPU *cpu, u32 instr) {
             assert(rd != CPUReg::PC);
 
             cpu->r[rd] = (i8)cpu->read8(addr);
+            break;
+        case ExtraLoadOpcode::LDRSH:
+            assert(rd != CPUReg::PC);
+
+            assert(!(addr & 1));
+
+            cpu->r[rd] = (i16)cpu->read16(addr);
             break;
         default:
             std::printf("[ARM%d      ] Unhandled Extra Load opcode %s\n", cpu->cpuID, extraLoadNames[static_cast<int>(opcode)]);
@@ -1050,6 +1066,78 @@ void aMultiply(CPU *cpu, u32 instr) {
         } else {
             std::printf("[ARM%d      ] [0x%08X] MUL%s %s, %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isS) ? "S" : "", regNames[rd], regNames[rm], regNames[rs], regNames[rd], cpu->r[rd]);
         }
+    }
+}
+
+/* ARM state SMLAxy */
+template<bool isY, bool isX>
+void aSMLAxy(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rd = (instr >> 16) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+    const auto rn = (instr >> 12) & 0xF;
+    const auto rs = (instr >>  8) & 0xF;
+
+    assert((rd != CPUReg::PC) && (rm != CPUReg::PC) && (rn != CPUReg::PC) && (rs != CPUReg::PC));
+
+    i32 x, y;
+
+    if constexpr (isX) {
+        x = (i16)(cpu->r[rm] >> 16);
+    } else {
+        x = (i16)cpu->r[rm];
+    }
+
+    if constexpr (isY) {
+        y = (i16)(cpu->r[rs] >> 16);
+    } else {
+        y = (i16)cpu->r[rs];
+    }
+
+    const auto a = x * y;
+    const auto b = cpu->r[rn];
+    
+    cpu->r[rd] = a + b;
+
+    setSMLAFlags(cpu, a, b, cpu->r[rd]);
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        std::printf("[ARM%d      ] [0x%08X] SMLA%s%s%s %s, %s, %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isX) ? "T" : "B", (isY) ? "T" : "B", cond, regNames[rd], regNames[rm], regNames[rs], regNames[rn], regNames[rd], cpu->r[rd]);
+    }
+}
+
+/* ARM state SMULxy */
+template<bool isY, bool isX>
+void aSMULxy(CPU *cpu, u32 instr) {
+    // Get operands
+    const auto rd = (instr >> 16) & 0xF;
+    const auto rm = (instr >>  0) & 0xF;
+    const auto rs = (instr >>  8) & 0xF;
+
+    assert((rd != CPUReg::PC) && (rm != CPUReg::PC) && (rs != CPUReg::PC));
+
+    i32 x, y;
+
+    if constexpr (isX) {
+        x = (i16)(cpu->r[rm] >> 16);
+    } else {
+        x = (i16)cpu->r[rm];
+    }
+
+    if constexpr (isY) {
+        y = (i16)(cpu->r[rs] >> 16);
+    } else {
+        y = (i16)cpu->r[rs];
+    }
+
+    cpu->r[rd] = x * y;
+
+    if (doDisasm) {
+        const auto cond = condNames[instr >> 28];
+
+        std::printf("[ARM%d      ] [0x%08X] SMUL%s%s%s %s, %s, %s; %s = 0x%08X\n", cpu->cpuID, cpu->cpc, (isX) ? "T" : "B", (isY) ? "T" : "B", cond, regNames[rd], regNames[rm], regNames[rs], regNames[rd], cpu->r[rd]);
     }
 }
 
@@ -2015,6 +2103,22 @@ void init() {
     instrTableARM[0x1BD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 0, 1>;
     instrTableARM[0x1DD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 1, 0>;
     instrTableARM[0x1FD] = &aExtraLoad<ExtraLoadOpcode::LDRSB, 1, 1, 1, 1>;
+    instrTableARM[0x01F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 0, 0>;
+    instrTableARM[0x03F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 0, 1>;
+    instrTableARM[0x05F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 1, 0>;
+    instrTableARM[0x07F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 0, 1, 1>;
+    instrTableARM[0x09F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 1, 0, 0>;
+    instrTableARM[0x0BF] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 1, 0, 1>;
+    instrTableARM[0x0DF] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 1, 1, 0>;
+    instrTableARM[0x0FF] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 0, 1, 1, 1>;
+    instrTableARM[0x11F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 0, 0, 0>;
+    instrTableARM[0x13F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 0, 0, 1>;
+    instrTableARM[0x15F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 0, 1, 0>;
+    instrTableARM[0x17F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 0, 1, 1>;
+    instrTableARM[0x19F] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 1, 0, 0>;
+    instrTableARM[0x1BF] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 1, 0, 1>;
+    instrTableARM[0x1DF] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 1, 1, 0>;
+    instrTableARM[0x1FF] = &aExtraLoad<ExtraLoadOpcode::LDRSH, 1, 1, 1, 1>;
 
     //instrTableARM[0x00D] = &aExtraLoad<ExtraLoadOpcode::LDRD , 0, 0, 0, 0>;
     //instrTableARM[0x00F] = &aExtraLoad<ExtraLoadOpcode::STRD , 0, 0, 0, 0>;
@@ -2029,6 +2133,16 @@ void init() {
     instrTableARM[0x123] = &aBLX<0>;
 
     instrTableARM[0x161] = &aCLZ;
+
+    instrTableARM[0x108] = &aSMLAxy<0, 0>;
+    instrTableARM[0x10A] = &aSMLAxy<0, 1>;
+    instrTableARM[0x10C] = &aSMLAxy<1, 0>;
+    instrTableARM[0x10E] = &aSMLAxy<1, 1>;
+
+    instrTableARM[0x168] = &aSMULxy<0, 0>;
+    instrTableARM[0x16A] = &aSMULxy<0, 1>;
+    instrTableARM[0x16C] = &aSMULxy<1, 0>;
+    instrTableARM[0x16E] = &aSMULxy<1, 1>;
 
     for (int i = 0x320; i < 0x330; i++) {
         instrTableARM[i | (0 << 6)] = &aMSR<0, 1>;
