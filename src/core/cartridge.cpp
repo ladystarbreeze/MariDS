@@ -9,7 +9,14 @@
 #include <cstdio>
 #include <cstring>
 
+#include "intc.hpp"
+#include "scheduler.hpp"
+
 namespace nds::cartridge {
+
+// Cartridge constants
+
+constexpr u32 CHIP_ID = 0x00001FC2;
 
 enum KEYMode {
     None, KEY1, KEY2,
@@ -28,21 +35,46 @@ enum class CartReg {
 
 struct ROMCTRL {
     bool drq;
+    u8   bsize;
+    bool clk;
     bool resb;
     bool busy;
 };
 
+struct CartStream {
+    u8 buf[0x4000];
+
+    int idx;
+};
+
+// Cartridge and buffer
+
 std::ifstream cart;
+
+CartStream stream;
+
+int argLen;
+
+// Encryption related stuff
 
 u32 key1Table[0x1048 / 4];
 
 KEYMode keyMode;
 
+// Cartridge IO
+
 ROMCTRL romctrl;
 
 u64 romcmd;
 
-int argLen;
+// Scheduler
+u64 idReceive;
+
+void receiveEvent(i64 c) {
+    (void)c;
+
+    romctrl.drq = true;
+}
 
 void init(const char *gamePath, u8 *const bios7) {
     // Open cartridge file
@@ -54,6 +86,13 @@ void init(const char *gamePath, u8 *const bios7) {
     std::memcpy(key1Table, bios7 + 0x30, 0x1048);
 
     keyMode = KEYMode::None;
+
+    // Register scheduler event
+    idReceive = scheduler::registerEvent([](int, i64 c) { receiveEvent(c); });
+}
+
+void setKEY2() {
+    keyMode = KEYMode::KEY2;
 }
 
 std::ifstream *getCart() {
@@ -87,35 +126,20 @@ void key1Decrypt(u32 *in) {
 }
 
 void doCmd() {
-    romctrl.drq = true;
+    stream.idx = 0;
+
+    // Get argument size
+    switch (romctrl.bsize) {
+        case 0: argLen = 0; break;
+        case 7: argLen = 4; break;
+        default:
+            argLen = 0x100 << romctrl.bsize;
+            break;
+    }
 
     switch (keyMode) {
         case KEYMode::None:
             switch (romcmd >> 56) { // Unencrypted commands
-                case 0x00:
-                    std::printf("[Cartridge ] Get Header (0x%016llX)\n", romcmd);
-
-                    argLen = 0x200;
-                    break;
-                case 0x3C:
-                    std::printf("[Cartridge ] Activate KEY1 (0x%016llX)\n", romcmd);
-
-                    keyMode = KEYMode::KEY1;
-
-                    argLen = 0;
-
-                    romctrl.busy = romctrl.drq = false;
-                    break;
-                case 0x90:
-                    std::printf("[Cartridge ] Get 1st Chip ID (0x%016llX)\n", romcmd);
-
-                    argLen = 4;
-                    break;
-                case 0x9F:
-                    std::printf("[Cartridge ] Dummy (0x%016llX)\n", romcmd);
-
-                    argLen = 0x2000;
-                    break;
                 default:
                     std::printf("[Cartridge ] Unhandled command 0x%016llX\n", romcmd);
                     
@@ -124,7 +148,7 @@ void doCmd() {
             break;
         case KEYMode::KEY1: // KEY1 decrypted commands
             {
-                key1Decrypt((u32 *)&romcmd);
+                // key1Decrypt((u32 *)&romcmd);
                 
                 switch (romcmd >> 60) {
                     default:
@@ -135,9 +159,38 @@ void doCmd() {
             }
             break;
         case KEYMode::KEY2:
-            std::printf("[Cartridge ] Unhandled KEY2 command 0x%016llX\n", romcmd);
+            switch (romcmd >> 56) {
+                case 0xB7:
+                    {
+                        const u32 addr = romcmd >> 24;
 
-            exit(0);
+                        std::printf("[Cartridge ] Get Data; Address = 0x%08X, Size = 0x%04X\n", addr, (u32)argLen);
+
+                        assert(!(addr & 0x1FF));
+
+                        // Read cartridge data into buffer
+                        cart.seekg(addr, std::ios::beg);
+                        cart.read((char *)stream.buf, argLen);
+                    }
+                    break;
+                case 0xB8:
+                    std::printf("[Cartridge ] Get Chip ID; Size = 0x%04X\n", (u32)argLen);
+
+                    for (int i = 0; i < argLen; i++) { // Load chip ID into buffer
+                        std::memcpy(stream.buf, &CHIP_ID, sizeof(u32));
+                    }
+                    break;
+                default:
+                    std::printf("[Cartridge ] Unhandled KEY2 command 0x%016llX\n", romcmd);
+
+                    exit(0);
+            }
+    }
+
+    if (!argLen) {
+        romctrl.busy = false;
+    } else {
+        scheduler::addEvent(idReceive, 0, (romctrl.clk) ? 32 : 20);
     }
 }
 
@@ -148,9 +201,11 @@ u32 read32ARM7(u32 addr) {
         case static_cast<u32>(CartReg::ROMCTRL):
             std::printf("[Cart:ARM7 ] Read32 @ ROMCTRL\n");
 
-            data  = (u32)romctrl.drq  << 23;
-            data |= (u32)romctrl.resb << 29;
-            data |= (u32)romctrl.busy << 31;
+            data  = (u32)romctrl.drq   << 23;
+            data |= (u32)romctrl.bsize << 24;
+            data |= (u32)romctrl.clk   << 27;
+            data |= (u32)romctrl.resb  << 29;
+            data |= (u32)romctrl.busy  << 31;
             break;
         default:
             std::printf("[Cart:ARM7 ] Unhandled read32 @ 0x%08X\n", addr);
@@ -168,9 +223,11 @@ u32 read32ARM9(u32 addr) {
         case static_cast<u32>(CartReg::ROMCTRL):
             std::printf("[Cart:ARM9 ] Read32 @ ROMCTRL\n");
 
-            data  = (u32)romctrl.drq  << 23;
-            data |= (u32)romctrl.resb << 29;
-            data |= (u32)romctrl.busy << 31;
+            data  = (u32)romctrl.drq   << 23;
+            data |= (u32)romctrl.bsize << 24;
+            data |= (u32)romctrl.clk   << 27;
+            data |= (u32)romctrl.resb  << 29;
+            data |= (u32)romctrl.busy  << 31;
             break;
         default:
             std::printf("[Cart:ARM9 ] Unhandled read32 @ 0x%08X\n", addr);
@@ -230,8 +287,10 @@ void write32ARM7(u32 addr, u32 data) {
         case static_cast<u32>(CartReg::ROMCTRL):
             std::printf("[Cart:ARM7 ] Write32 @ ROMCTRL = 0x%08X\n", data);
 
-            romctrl.resb = romctrl.resb || (data & (1 << 29));
-            romctrl.busy = data & (1 << 31);
+            romctrl.bsize = (data >> 24) & 7;
+            romctrl.clk   = data & (1 << 27);
+            romctrl.resb  = romctrl.resb || (data & (1 << 29));
+            romctrl.busy  = data & (1 << 31);
 
             if (romctrl.busy) doCmd();
             break;
@@ -297,6 +356,8 @@ void write32ARM9(u32 addr, u32 data) {
         case static_cast<u32>(CartReg::ROMCTRL):
             std::printf("[Cart:ARM9 ] Write32 @ ROMCTRL = 0x%08X\n", data);
 
+            romctrl.bsize = (data >> 24) & 7;
+            romctrl.clk   = data & (1 << 27);
             romctrl.resb = romctrl.resb || (data & (1 << 29));
             romctrl.busy = data & (1 << 31);
 
@@ -318,15 +379,28 @@ void write32ARM9(u32 addr, u32 data) {
 u32 readROMDATA() {
     std::printf("[Cart:ARM7 ] Read32 @ ROMDATA\n");
 
-    if (argLen > 0) {
-        argLen -= 4;
+    assert(argLen);
 
-        if (!argLen) {
-            romctrl.busy = romctrl.drq = false;
-        }
+    u32 data;
+
+    argLen -= 4;
+
+    if (!argLen) {
+        romctrl.busy = false;
+
+        // TODO: raise cart IRQ
+    } else {
+        scheduler::addEvent(idReceive, 0, (romctrl.clk) ? 32 : 20);
     }
 
-    return -1;
+    // Read from cartridge buffer
+    std::memcpy(&data, &stream.buf[stream.idx], sizeof(u32));
+
+    stream.idx += 4;
+
+    romctrl.drq = false;
+
+    return data;
 }
 
 }

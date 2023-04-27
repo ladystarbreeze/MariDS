@@ -13,6 +13,8 @@ namespace nds::cartridge {
 
 void init(const char *gamePath, u8 *bios7);
 
+void setKEY2();
+
 std::ifstream *getCart();
 
 u32 read32ARM7(u32 addr);
