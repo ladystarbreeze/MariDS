@@ -9,8 +9,9 @@
 #include <cstdio>
 #include <cstring>
 
-#include "intc.hpp"
-#include "scheduler.hpp"
+#include "auxspi.hpp"
+#include "../intc.hpp"
+#include "../scheduler.hpp"
 
 namespace nds::cartridge {
 
@@ -194,12 +195,29 @@ void doCmd() {
     }
 }
 
+u16 read16ARM7(u32 addr) {
+    u16 data;
+
+    switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT):
+            return auxspi::readAUXSPICNT16();
+        case static_cast<u32>(CartReg::AUXSPIDATA):
+            return auxspi::readAUXSPIDATA16();
+        default:
+            std::printf("[Cart:ARM7 ] Unhandled read16 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+
+    return data;
+}
+
 u32 read32ARM7(u32 addr) {
     u32 data;
 
     switch (addr) {
         case static_cast<u32>(CartReg::ROMCTRL):
-            std::printf("[Cart:ARM7 ] Read32 @ ROMCTRL\n");
+            //std::printf("[Cart:ARM7 ] Read32 @ ROMCTRL\n");
 
             data  = (u32)romctrl.drq   << 23;
             data |= (u32)romctrl.bsize << 24;
@@ -221,7 +239,7 @@ u32 read32ARM9(u32 addr) {
 
     switch (addr) {
         case static_cast<u32>(CartReg::ROMCTRL):
-            std::printf("[Cart:ARM9 ] Read32 @ ROMCTRL\n");
+            //std::printf("[Cart:ARM9 ] Read32 @ ROMCTRL\n");
 
             data  = (u32)romctrl.drq   << 23;
             data |= (u32)romctrl.bsize << 24;
@@ -240,9 +258,9 @@ u32 read32ARM9(u32 addr) {
 
 void write8ARM7(u32 addr, u8 data) {
     switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT) + 0:
         case static_cast<u32>(CartReg::AUXSPICNT) + 1:
-            std::printf("[Cart:ARM7 ] Write8 @ AUXSPICNT_HI = 0x%02X\n", data);
-            break;
+            return auxspi::writeAUXSPICNT8(addr & 1, data);
         case static_cast<u32>(CartReg::ROMCMD) + 0:
         case static_cast<u32>(CartReg::ROMCMD) + 1:
         case static_cast<u32>(CartReg::ROMCMD) + 2:
@@ -269,6 +287,10 @@ void write8ARM7(u32 addr, u8 data) {
 
 void write16ARM7(u32 addr, u16 data) {
     switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT):
+            return auxspi::writeAUXSPICNT16(data);
+        case static_cast<u32>(CartReg::AUXSPIDATA):
+            return auxspi::writeAUXSPIDATA16(data);
         case static_cast<u32>(CartReg::ROMSEED0_H):
             std::printf("[Cart:ARM7 ] Write16 @ ROMSEED0_HI = 0x%04X\n", data);
             break;
@@ -309,9 +331,9 @@ void write32ARM7(u32 addr, u32 data) {
 
 void write8ARM9(u32 addr, u8 data) {
     switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT) + 0:
         case static_cast<u32>(CartReg::AUXSPICNT) + 1:
-            std::printf("[Cart:ARM9 ] Write8 @ AUXSPICNT_HI = 0x%02X\n", data);
-            break;
+            return auxspi::writeAUXSPICNT8(addr & 1, data);
         case static_cast<u32>(CartReg::ROMCMD) + 0:
         case static_cast<u32>(CartReg::ROMCMD) + 1:
         case static_cast<u32>(CartReg::ROMCMD) + 2:
@@ -377,7 +399,7 @@ void write32ARM9(u32 addr, u32 data) {
 }
 
 u32 readROMDATA() {
-    std::printf("[Cart:ARM7 ] Read32 @ ROMDATA\n");
+    //std::printf("[Cart:ARM7 ] Read32 @ ROMDATA\n");
 
     assert(argLen);
 

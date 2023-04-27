@@ -10,12 +10,12 @@
 #include <vector>
 
 #include "bus.hpp"
-#include "cartridge.hpp"
 #include "firmware.hpp"
 #include "ipc.hpp"
 #include "ppu.hpp"
 #include "scheduler.hpp"
 #include "timer.hpp"
+#include "cartridge/cartridge.hpp"
 #include "cpu/cpu.hpp"
 #include "cpu/cpuint.hpp"
 

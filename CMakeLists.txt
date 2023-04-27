@@ -10,7 +10,6 @@ set(SOURCES
     src/main.cpp
     src/common/file.cpp
     src/core/bus.cpp
-    src/core/cartridge.cpp
     src/core/dma.cpp
     src/core/firmware.cpp
     src/core/intc.cpp
@@ -21,6 +20,8 @@ set(SOURCES
     src/core/scheduler.cpp
     src/core/spi.cpp
     src/core/timer.cpp
+    src/core/cartridge/auxspi.cpp
+    src/core/cartridge/cartridge.cpp
     src/core/cpu/cpu.cpp
     src/core/cpu/cpuint.cpp
     src/core/cpu/cp15.cpp
@@ -30,7 +31,6 @@ set(HEADERS
     src/common/file.hpp
     src/common/types.hpp
     src/core/bus.hpp
-    src/core/cartridge.hpp
     src/core/dma.hpp
     src/core/firmware.hpp
     src/core/intc.hpp
@@ -41,6 +41,8 @@ set(HEADERS
     src/core/scheduler.hpp
     src/core/spi.hpp
     src/core/timer.hpp
+    src/core/cartridge/auxspi.hpp
+    src/core/cartridge/cartridge.hpp
     src/core/cpu/cpu.hpp
     src/core/cpu/cpuint.hpp
     src/core/cpu/cp15.hpp

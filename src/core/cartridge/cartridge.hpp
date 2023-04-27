@@ -7,7 +7,7 @@
 
 #include <fstream>
 
-#include "../common/types.hpp"
+#include "../../common/types.hpp"
 
 namespace nds::cartridge {
 
@@ -17,6 +17,7 @@ void setKEY2();
 
 std::ifstream *getCart();
 
+u16 read16ARM7(u32 addr);
 u32 read32ARM7(u32 addr);
 
 u32 read32ARM9(u32 addr);
