@@ -44,7 +44,7 @@ constexpr const char *shiftNames[] = {
 };
 
 constexpr const char *thumbLoadNames[] = {
-    "STR", "STRH", "N/A", "LDRSB", "LDR", "LDRH", "LDRB", "LDRSH",
+    "STR", "STRH", "STRB", "LDRSB", "LDR", "LDRH", "LDRB", "LDRSH",
 };
 
 /* Condition codes */
@@ -79,6 +79,7 @@ enum class THUMBDPOpcode {
 enum class THUMBLoadOpcode {
     STR   = 0,
     STRH  = 1,
+    STRB  = 2,
     LDRSB = 3,
     LDR   = 4,
     LDRH  = 5,
@@ -1297,8 +1298,6 @@ void aSwap(CPU *cpu, u32 instr) {
     const auto addr = cpu->r[rn];
     const auto data = cpu->r[rm];
 
-    assert(!(addr & 3));
-
     u32 tmp;
 
     if constexpr (isB) {
@@ -1306,9 +1305,9 @@ void aSwap(CPU *cpu, u32 instr) {
 
         cpu->write8(addr, data);
     } else {
-        tmp = cpu->read32(addr);
+        tmp = rotateRead32(cpu->read32(addr & ~3), addr);
 
-        cpu->write32(addr, data);
+        cpu->write32(addr & ~3, data);
     }
 
     cpu->r[rd] = tmp;
@@ -1441,7 +1440,7 @@ void tBranchExchange(CPU *cpu, u16 instr) {
     if constexpr (isLink) {
         assert(rm != CPUReg::LR);
 
-        cpu->r[CPUReg::LR] = cpu->r[CPUReg::PC];
+        cpu->r[CPUReg::LR] = cpu->r[CPUReg::PC] | 1;
     }
 
     const auto addr = cpu->get(rm);
@@ -1499,6 +1498,11 @@ void tDataProcessing(CPU *cpu, u16 instr) {
             break;
         case THUMBDPOpcode::LSR:
             cpu->r[rd] = shift<ShiftType::LSR, false>(cpu, cpu->r[rd], cpu->r[rm]);
+
+            setBitFlags(cpu, cpu->r[rd]);
+            break;
+        case THUMBDPOpcode::ASR:
+            cpu->r[rd] = shift<ShiftType::ASR, false>(cpu, cpu->r[rd], cpu->r[rm]);
 
             setBitFlags(cpu, cpu->r[rd]);
             break;
@@ -1621,7 +1625,7 @@ void tDataProcessingSpecial(CPU *cpu, u16 instr) {
 
     switch (opcode) {
         case DPOpcode::ADD:
-            cpu->r[rd] += op2;
+            cpu->r[rd] = op1 + op2;
             break;
         case DPOpcode::CMP:
             setSubFlags(cpu, op1, op2, op1 - op2);
@@ -1847,6 +1851,9 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
         case THUMBLoadOpcode::STRH:
             cpu->write16(addr & ~1, data);
             break;
+        case THUMBLoadOpcode::STRB:
+            cpu->write8(addr, data);
+            break;
         case THUMBLoadOpcode::LDR:
             cpu->r[rd] = rotateRead32(cpu->read32(addr & ~3), addr);
             break;
@@ -1873,7 +1880,7 @@ void tLoadRegisterOffset(CPU *cpu, u16 instr) {
     }
 
     if (doDisasm) {
-        if constexpr ((opcode == THUMBLoadOpcode::STR) || (opcode == THUMBLoadOpcode::STRH)) {
+        if constexpr ((opcode == THUMBLoadOpcode::STR) || (opcode == THUMBLoadOpcode::STRH) || (opcode == THUMBLoadOpcode::STRB)) {
             std::printf("[ARM%d:T    ] [0x%08X] %s %s, [%s, %s]; [0x%08X] = %s = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbLoadNames[static_cast<int>(opcode)], regNames[rd], regNames[rn], regNames[rm], addr, regNames[rd], data);
         } else {
             std::printf("[ARM%d:T    ] [0x%08X] %s %s, [%s, %s]; %s = [0x%08X] = 0x%08X\n", cpu->cpuID, cpu->cpc, thumbLoadNames[static_cast<int>(opcode)], regNames[rd], regNames[rn], regNames[rm], regNames[rd], addr, data);
@@ -2339,6 +2346,7 @@ void init() {
         switch ((i >> 3) & 7) {
             case 0: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STR  >; break;
             case 1: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STRH >; break;
+            case 2: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::STRB >; break;
             case 3: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRSB>; break;
             case 4: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDR  >; break;
             case 5: instrTableTHUMB[i] = &tLoadRegisterOffset<THUMBLoadOpcode::LDRH >; break;
