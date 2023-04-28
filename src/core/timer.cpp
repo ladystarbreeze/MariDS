@@ -34,10 +34,10 @@ struct Timer {
     u32 ctr, subctr, prescaler;
 };
 
-Timer timers[8];
+Timer timers7[4], timers9[4];
 
-void checkCascade(int tmID) {
-    auto &tm = timers[tmID];
+void checkCascade7(int tmID) {
+    auto &tm = timers7[tmID];
 
     auto &cnt = tm.tmcnt;
 
@@ -48,31 +48,51 @@ void checkCascade(int tmID) {
             // Reload counter, trigger interrupt
             tm.ctr = tm.reload;
 
-            if (cnt.irqen) {
-                if (tmID < 4) {
-                    intc::sendInterrupt7((IntSource)(tmID + 3));
-                } else {
-                    intc::sendInterrupt9((IntSource)(tmID + 3));
-                }
-            }
+            if (cnt.irqen) intc::sendInterrupt7((IntSource)(tmID + 3));
 
             // Check previous timer for cascade
-            if (tmID > 0) checkCascade(tmID - 1);
+            if ((tmID != 0)) checkCascade7(tmID - 1);
+        }
+    }
+}
+
+void checkCascade9(int tmID) {
+    auto &tm = timers9[tmID];
+
+    auto &cnt = tm.tmcnt;
+
+    if (cnt.tmen && cnt.cascade) {
+        ++tm.ctr;
+
+        if (tm.ctr & (1 << 16)) {
+            // Reload counter, trigger interrupt
+            tm.ctr = tm.reload;
+
+            if (cnt.irqen) intc::sendInterrupt9((IntSource)(tmID + 3));
+
+            // Check previous timer for cascade
+            if ((tmID != 0)) checkCascade9(tmID - 1);
         }
     }
 }
 
 void init() {
-    for (auto &i : timers) {
+    for (auto &i : timers7) {
+        i.prescaler = 1;
+
+        i.ctr = i.subctr = 0;
+    }
+
+    for (auto &i : timers9) {
         i.prescaler = 1;
 
         i.ctr = i.subctr = 0;
     }
 }
 
-void run(i64 runCycles) {
-    for (int i = 0; i < 8; i++) {
-        auto &tm = timers[i];
+void run7(i64 runCycles) {
+    for (int i = 0; i < 4; i++) {
+        auto &tm = timers7[i];
 
         auto &cnt = tm.tmcnt;
 
@@ -87,16 +107,10 @@ void run(i64 runCycles) {
                 // Reload counter, trigger interrupt
                 tm.ctr = tm.reload;
 
-                if (cnt.irqen) {
-                    if (i < 4) {
-                        intc::sendInterrupt7((IntSource)(i + 3));
-                    } else {
-                        intc::sendInterrupt9((IntSource)(i + 3));
-                    }
-                }
+                if (cnt.irqen) intc::sendInterrupt7((IntSource)(i + 3));
 
                 // Check previous timer for cascade
-                if (i > 0) checkCascade(i - 1);
+                if (i != 0) checkCascade7(i - 1);
             }
 
             tm.subctr -= tm.prescaler;
@@ -104,12 +118,45 @@ void run(i64 runCycles) {
     }
 }
 
+void run9(i64 runCycles) {
+    for (int i = 0; i < 4; i++) {
+        auto &tm = timers9[i];
+
+        auto &cnt = tm.tmcnt;
+
+        if (!cnt.tmen || cnt.cascade) continue;
+
+        tm.subctr += runCycles;
+
+        while (tm.subctr > tm.prescaler) {
+            ++tm.ctr;
+
+            if (tm.ctr & (1 << 16)) {
+                // Reload counter, trigger interrupt
+                tm.ctr = tm.reload;
+
+                if (cnt.irqen) intc::sendInterrupt9((IntSource)(i + 3));
+
+                // Check previous timer for cascade
+                if (i != 0) checkCascade9(i - 1);
+            }
+
+            tm.subctr -= tm.prescaler;
+        }
+    }
+}
+
+void run(i64 runCycles) {
+    run7(runCycles);
+    run9(runCycles);
+}
+
 u16 read16ARM7(u32 addr) {
     u16 data;
 
     const auto tmID = (addr >> 2) & 3;
 
-    auto &tm = timers[tmID];
+    auto &tm = timers7[tmID];
 
     switch (addr & ~(3 << 2)) {
         case static_cast<u32>(TimerReg::TMCNT):
@@ -136,10 +183,42 @@ u16 read16ARM7(u32 addr) {
     return data;
 }
 
+u16 read16ARM9(u32 addr) {
+    u16 data;
+
+    const auto tmID = (addr >> 2) & 3;
+
+    auto &tm = timers9[tmID];
+
+    switch (addr & ~(3 << 2)) {
+        case static_cast<u32>(TimerReg::TMCNT):
+            std::printf("[Timer:ARM9] Read16 @ TM%uCNT_L\n", tmID);
+            return tm.ctr;
+        case static_cast<u32>(TimerReg::TMCNT_H):
+            {
+                std::printf("[Timer:ARM9] Read16 @ TM%uCNT_H\n", tmID);
+
+                auto &cnt = tm.tmcnt;
+
+                data  = (u16)cnt.prescaler;
+                data |= (u16)cnt.cascade << 2;
+                data |= (u16)cnt.irqen   << 6;
+                data |= (u16)cnt.tmen    << 7;
+            }
+            break;
+        default:
+            std::printf("[Timer:ARM9] Unhandled read16 @ 0x%08X\n", addr);
+            
+            exit(0);
+    }
+
+    return data;
+}
+
 void write16ARM7(u32 addr, u16 data) {
     const auto tmID = (addr >> 2) & 3;
 
-    auto &tm = timers[tmID];
+    auto &tm = timers7[tmID];
 
     switch (addr & ~(3 << 2)) {
         case static_cast<u32>(TimerReg::TMCNT):
@@ -183,7 +262,7 @@ void write16ARM7(u32 addr, u16 data) {
 void write32ARM7(u32 addr, u32 data) {
     const auto tmID = (addr >> 2) & 3;
 
-    auto &tm = timers[tmID];
+    auto &tm = timers7[tmID];
 
     switch (addr & ~(3 << 2)) {
         case static_cast<u32>(TimerReg::TMCNT):
@@ -224,7 +303,7 @@ void write32ARM7(u32 addr, u32 data) {
 void write16ARM9(u32 addr, u16 data) {
     const auto tmID = (addr >> 2) & 3;
 
-    auto &tm = timers[tmID + 4];
+    auto &tm = timers9[tmID];
 
     switch (addr & ~(3 << 2)) {
         case static_cast<u32>(TimerReg::TMCNT):
