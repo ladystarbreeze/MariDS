@@ -130,14 +130,10 @@ u32 readRECV7() {
             // Check for SEND empty IRQ
             auto &otherCnt = ipcfifocnt[1];
 
-            const auto oldIRQ = otherCnt.sirqen && otherCnt.sempty;
-
             otherCnt.sempty = r.empty();
             otherCnt.sfull  = false;
 
-            const auto irq = otherCnt.sirqen && otherCnt.sempty;
-
-            if (!oldIRQ && irq) intc::sendInterrupt9(IntSource::IPCSEND);
+            if (r.empty() && otherCnt.sirqen) intc::sendInterrupt9(IntSource::IPCSEND);
         } else {
             cnt.error = true; // RECV empty
         }
@@ -209,14 +205,10 @@ u32 readRECV9() {
             // Check for SEND empty IRQ
             auto &otherCnt = ipcfifocnt[0];
 
-            const auto oldIRQ = otherCnt.sirqen && otherCnt.sempty;
-
             otherCnt.sempty = r.empty();
             otherCnt.sfull  = false;
 
-            const auto irq = otherCnt.sirqen && otherCnt.sempty;
-
-            if (!oldIRQ && irq) intc::sendInterrupt7(IntSource::IPCSEND);
+            if (r.empty() && otherCnt.sirqen) intc::sendInterrupt7(IntSource::IPCSEND);
         } else {
             cnt.error = true; // RECV empty
         }
@@ -252,10 +244,6 @@ void write16ARM7(u32 addr, u16 data) {
 
                 auto &cnt = ipcfifocnt[0];
 
-                cnt.sirqen = data & (1 <<  2);
-                cnt.rirqen = data & (1 << 10);
-                cnt.fifoen = data & (1 << 15);
-
                 if (data & (1 << 3)) { // Clear SEND
                     clearSend(0);
                 }
@@ -263,6 +251,13 @@ void write16ARM7(u32 addr, u16 data) {
                 if (data & (1 << 14)) { // Clear ERROR
                     cnt.error = false;
                 }
+
+                if ((data & (1 <<  2)) && !cnt.sirqen &&  send[0].empty()) intc::sendInterrupt7(IntSource::IPCSEND);
+                if ((data & (1 << 10)) && !cnt.rirqen && !send[1].empty()) intc::sendInterrupt7(IntSource::IPCRECV);
+
+                cnt.sirqen = data & (1 <<  2);
+                cnt.rirqen = data & (1 << 10);
+                cnt.fifoen = data & (1 << 15);
             }
             break;
         default:
@@ -292,14 +287,12 @@ void write32ARM7(u32 addr, u32 data) {
                         // Check for RECV empty IRQ
                         auto &otherCnt = ipcfifocnt[1];
 
-                        const auto oldIRQ = otherCnt.rirqen && !otherCnt.rempty;
+                        const auto oldEmpty = otherCnt.rempty;
 
                         otherCnt.rempty = false;
                         otherCnt.rfull  = s.size() == FIFO_SIZE;
 
-                        const auto irq = otherCnt.rirqen && !otherCnt.rempty;
-
-                        if (!oldIRQ && irq) intc::sendInterrupt9(IntSource::IPCRECV);
+                        if (otherCnt.rirqen && oldEmpty) intc::sendInterrupt9(IntSource::IPCRECV);
                     } else {
                         cnt.error = true; // SEND full
                     }
@@ -334,10 +327,6 @@ void write16ARM9(u32 addr, u16 data) {
 
                 auto &cnt = ipcfifocnt[1];
 
-                cnt.sirqen = data & (1 <<  2);
-                cnt.rirqen = data & (1 << 10);
-                cnt.fifoen = data & (1 << 15);
-
                 if (data & (1 << 3)) { // Clear SEND
                     clearSend(1);
                 }
@@ -345,6 +334,13 @@ void write16ARM9(u32 addr, u16 data) {
                 if (data & (1 << 14)) { // Clear ERROR
                     cnt.error = false;
                 }
+
+                if ((data & (1 <<  2)) && !cnt.sirqen &&  send[1].empty()) intc::sendInterrupt9(IntSource::IPCSEND);
+                if ((data & (1 << 10)) && !cnt.rirqen && !send[0].empty()) intc::sendInterrupt9(IntSource::IPCRECV);
+
+                cnt.sirqen = data & (1 <<  2);
+                cnt.rirqen = data & (1 << 10);
+                cnt.fifoen = data & (1 << 15);
             }
             break;
         default:
@@ -374,14 +370,12 @@ void write32ARM9(u32 addr, u32 data) {
                         // Check for RECV empty IRQ
                         auto &otherCnt = ipcfifocnt[0];
 
-                        const auto oldIRQ = otherCnt.rirqen && !otherCnt.rempty;
+                        const auto oldEmpty = otherCnt.rempty;
 
                         otherCnt.rempty = false;
                         otherCnt.rfull  = s.size() == FIFO_SIZE;
 
-                        const auto irq = otherCnt.rirqen && !otherCnt.rempty;
-
-                        if (!oldIRQ && irq) intc::sendInterrupt7(IntSource::IPCRECV);
+                        if (otherCnt.rirqen && oldEmpty) intc::sendInterrupt7(IntSource::IPCRECV);
                     } else {
                         cnt.error = true; // SEND full
                     }
