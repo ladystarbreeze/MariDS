@@ -190,7 +190,16 @@ u16 read16(u32 addr) {
 }
 
 u32 read32(u32 addr) {
+    u32 data;
+
     switch (addr) {
+        case static_cast<u32>(MathReg::DIVCNT):
+            std::printf("[Math      ] Read32 @ DIVCNT\n");
+
+            data  = (u32)divcnt.divmode;
+            data |= (u32)divcnt.div0 << 14;
+            data |= (u32)divcnt.busy << 15;
+            break;
         case static_cast<u32>(MathReg::DIVNUMER):
             std::printf("[Math      ] Read32 @ DIV_NUMER_L\n");
             return numer[0];
@@ -229,6 +238,8 @@ u32 read32(u32 addr) {
 
             exit(0);
     }
+
+    return data;
 }
 
 void write16(u32 addr, u16 data) {
