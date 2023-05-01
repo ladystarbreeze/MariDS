@@ -10,10 +10,13 @@
 #include <cstring>
 
 #include "auxspi.hpp"
+#include "../dma.hpp"
 #include "../intc.hpp"
 #include "../scheduler.hpp"
 
 namespace nds::cartridge {
+
+using IntSource = intc::IntSource;
 
 // Cartridge constants
 
@@ -68,13 +71,27 @@ ROMCTRL romctrl;
 
 u64 romcmd;
 
+bool isARM9Access;
+
 // Scheduler
 u64 idReceive;
+
+u32 bswap32(u32 data)
+{
+    return (data >> 24) | ((data >> 8) & 0xFF00) | ((data << 8) & 0xFF0000) | (data << 24);
+}
 
 void receiveEvent(i64 c) {
     (void)c;
 
     romctrl.drq = true;
+
+    // Check for cart DMA
+    if (isARM9Access) {
+        dma::checkCart9();
+    } else {
+        assert(false);
+    }
 }
 
 void init(const char *gamePath, u8 *const bios7) {
@@ -94,6 +111,14 @@ void init(const char *gamePath, u8 *const bios7) {
 
 void setKEY2() {
     keyMode = KEYMode::KEY2;
+}
+
+void setARM7Access() {
+    isARM9Access = false;
+}
+
+void setARM9Access() {
+    isARM9Access = true;
 }
 
 std::ifstream *getCart() {
@@ -234,6 +259,23 @@ u32 read32ARM7(u32 addr) {
     return data;
 }
 
+u16 read16ARM9(u32 addr) {
+    u16 data;
+
+    switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT):
+            return auxspi::readAUXSPICNT16();
+        case static_cast<u32>(CartReg::AUXSPIDATA):
+            return auxspi::readAUXSPIDATA16();
+        default:
+            std::printf("[Cart:ARM9 ] Unhandled read16 @ 0x%08X\n", addr);
+
+            exit(0);
+    }
+
+    return data;
+}
+
 u32 read32ARM9(u32 addr) {
     u32 data;
 
@@ -360,6 +402,10 @@ void write8ARM9(u32 addr, u8 data) {
 
 void write16ARM9(u32 addr, u16 data) {
     switch (addr) {
+        case static_cast<u32>(CartReg::AUXSPICNT):
+            return auxspi::writeAUXSPICNT16(data);
+        case static_cast<u32>(CartReg::AUXSPIDATA):
+            return auxspi::writeAUXSPIDATA16(data);
         case static_cast<u32>(CartReg::ROMSEED0_H):
             std::printf("[Cart:ARM9 ] Write16 @ ROMSEED0_HI = 0x%04X\n", data);
             break;
@@ -385,14 +431,32 @@ void write32ARM9(u32 addr, u32 data) {
 
             if (romctrl.busy) doCmd();
             break;
+        case static_cast<u32>(CartReg::ROMCMD) + 0:
+        case static_cast<u32>(CartReg::ROMCMD) + 4:
+            {
+                const auto i = addr & 4;
+
+                std::printf("[Cart:ARM9 ] Write32 @ ROMCMD[%u..%u] = 0x%08X\n", i + 3, i, data);
+
+                if (!i) {
+                    romcmd &= 0xFFFFFFFFull;
+
+                    romcmd |= (u64)bswap32(data) << 32;
+                } else {
+                    romcmd &= ~0xFFFFFFFFull;
+
+                    romcmd |= (u64)bswap32(data);
+                }
+            }
+            break;
         case static_cast<u32>(CartReg::ROMSEED0_L):
-            std::printf("[Cart:ARM7 ] Write9 @ ROMSEED0_LO = 0x%08X\n", data);
+            std::printf("[Cart:ARM9 ] Write32 @ ROMSEED0_LO = 0x%08X\n", data);
             break;
         case static_cast<u32>(CartReg::ROMSEED1_L):
-            std::printf("[Cart:ARM7 ] Write9 @ ROMSEED1_LO = 0x%08X\n", data);
+            std::printf("[Cart:ARM9 ] Write32 @ ROMSEED1_LO = 0x%08X\n", data);
             break;
         default:
-            std::printf("[Cart:ARM7 ] Unhandled write9 @ 0x%08X = 0x%08X\n", addr, data);
+            std::printf("[Cart:ARM9 ] Unhandled write32 @ 0x%08X = 0x%08X\n", addr, data);
 
             exit(0);
     }
@@ -410,7 +474,11 @@ u32 readROMDATA() {
     if (!argLen) {
         romctrl.busy = false;
 
-        // TODO: raise cart IRQ
+        if (isARM9Access) {
+            intc::sendInterrupt9(IntSource::NDSSlotDone);
+        } else {
+            intc::sendInterrupt7(IntSource::NDSSlotDone);
+        }
     } else {
         scheduler::addEvent(idReceive, 0, (romctrl.clk) ? 32 : 20);
     }
