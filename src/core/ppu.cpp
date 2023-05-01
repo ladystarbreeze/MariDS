@@ -180,7 +180,13 @@ void hblankEvent(i64 c) {
     
     dispstat[0].hblank = dispstat[1].hblank = true; // Technically incorrect, but should be fine for now
 
-    assert(!dispstat[0].hirqen && !dispstat[1].hirqen);
+    if (dispstat[0].hirqen) {
+        intc::sendInterrupt7(IntSource::HBLANK);
+    }
+
+    if (dispstat[1].hirqen) {
+        intc::sendInterrupt9(IntSource::HBLANK);
+    }
 
     scheduler::addEvent(idHBLANK, 0, CYCLES_PER_SCANLINE);
 }
@@ -215,7 +221,7 @@ void scanlineEvent(i64 c) {
     if (vcount == dispstat[0].lyc) {
         dispstat[0].vcounter = true;
 
-        assert(!dispstat[0].lycirqen);
+        if (dispstat[0].lycirqen) intc::sendInterrupt7(IntSource::VCOUNT);
     } else {
         dispstat[0].vcounter = false;
     }
@@ -223,7 +229,7 @@ void scanlineEvent(i64 c) {
     if (vcount == dispstat[1].lyc) {
         dispstat[1].vcounter = true;
 
-        assert(!dispstat[1].lycirqen);
+        if (dispstat[1].lycirqen) intc::sendInterrupt9(IntSource::VCOUNT);
     } else {
         dispstat[1].vcounter = false;
     }
@@ -1540,6 +1546,12 @@ u16 read16(int idx, u32 addr) {
         case static_cast<u32>(PPUReg::WINOUT):
             std::printf("[DISP%c     ] Read16 @ WINOUT\n", (idx) ? 'B' : 'A');
             return 0;
+        case static_cast<u32>(PPUReg::BLDCNT):
+            std::printf("[DISP%c     ] Read16 @ BLDCNT\n", (idx) ? 'B' : 'A');
+            return 0;
+        case static_cast<u32>(PPUReg::BLDALPHA):
+            std::printf("[DISP%c     ] Read16 @ BLDALPHA\n", (idx) ? 'B' : 'A');
+            return 0;
         case static_cast<u32>(PPUReg::DISP3DCNT):
             if (idx) {
                 std::printf("[DISP%c     ] Unhandled read16 @ 0x%08X\n", (idx) ? 'B' : 'A', addr);
@@ -1603,6 +1615,22 @@ u32 read32(int idx, u32 addr) {
     }
 
     return data;
+}
+
+void write8(int idx, u32 addr, u8 data) {
+    auto &d = disp[idx];
+    
+    switch (addr & ~0x1000) {
+        case static_cast<u32>(PPUReg::MOSAIC):
+            std::printf("[DISP%c     ] Write8 @ MOSAIC_L = 0x%02X\n", (idx) ? 'B' : 'A', data);
+            break;
+        case static_cast<u32>(PPUReg::MOSAIC) + 1:
+            std::printf("[DISP%c     ] Write8 @ MOSAIC_H = 0x%02X\n", (idx) ? 'B' : 'A', data);
+            break;
+        default:
+            std::printf("[DISP%c     ] Unhandled write8 @ 0x%08X = 0x%02X\n", (idx) ? 'B' : 'A', addr, data);
+            break;
+    }
 }
 
 void write16(int idx, u32 addr, u16 data) {
@@ -1912,6 +1940,10 @@ u16 readDISPSTAT7() {
     data |= (u16)dispstat[0].lycirqen << 5;
     
     return data | (dispstat[0].lyc << 7);
+}
+
+u16 readVCOUNT() {
+    return vcount;
 }
 
 void writeDISPSTAT7(u16 data) {

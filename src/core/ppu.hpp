@@ -45,10 +45,12 @@ void writePal32(u32 addr, u32 data);
 u16 read16(int idx, u32 addr);
 u32 read32(int idx, u32 addr);
 
+void write8 (int idx, u32 addr, u8  data);
 void write16(int idx, u32 addr, u16 data);
 void write32(int idx, u32 addr, u32 data);
 
 u16 readDISPSTAT7();
+u16 readVCOUNT();
 
 void writeDISPSTAT7(u16 data);
 
