@@ -107,7 +107,7 @@ void run7(i64 runCycles) {
                 // Reload counter, trigger interrupt
                 tm.ctr = tm.reload;
 
-                if (cnt.irqen) intc::sendInterrupt7((IntSource)(i + 3));
+                if (cnt.irqen) intc::sendInterrupt7((IntSource)((int)IntSource::Timer0 + i));
 
                 // Check previous timer for cascade
                 if (i != 0) checkCascade7(i - 1);
@@ -135,7 +135,7 @@ void run9(i64 runCycles) {
                 // Reload counter, trigger interrupt
                 tm.ctr = tm.reload;
 
-                if (cnt.irqen) intc::sendInterrupt9((IntSource)(i + 3));
+                if (cnt.irqen) intc::sendInterrupt9((IntSource)((int)IntSource::Timer0 + i));
 
                 // Check previous timer for cascade
                 if (i != 0) checkCascade9(i - 1);
