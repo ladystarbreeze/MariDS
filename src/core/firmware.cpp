@@ -15,6 +15,7 @@ namespace nds::firmware {
 enum FirmCmd {
     READ = 0x03,
     RDSR = 0x05,
+    WREN = 0x06,
 };
 
 enum FirmState {
@@ -93,6 +94,11 @@ void write(u8 data) {
 
                     firmState = FirmState::ReadStatus;
                     break;
+                case FirmCmd::WREN:
+                    std::printf("[Firmware  ] WREN\n");
+
+                    wel = true;
+                    break;
                 default:
                     std::printf("[Firmware  ] Unhandled command 0x%02X\n", firmCmd);
 
@@ -101,7 +107,7 @@ void write(u8 data) {
             break;
         case FirmState::GetAddress:
             firmAddr <<= 8;
-            firmAddr  |= data;
+            firmAddr  |= (u32)data;
 
             if (!--argLen) {
                 std::printf("[Firmware  ] Address = 0x%06X\n", firmAddr);
