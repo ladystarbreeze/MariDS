@@ -13,7 +13,7 @@ namespace nds::cpu::interpreter {
 
 // Interpreter constants
 
-constexpr auto doDisasm = false;
+auto doDisasm = false;
 
 constexpr const char *condNames[] = {
     "EQ", "NE", "HS", "LO", "MI", "PL", "VS", "VC",
@@ -2425,7 +2425,7 @@ void run(CPU *cpu, i64 runCycles) {
     for (auto c = runCycles; c > 0; c--) {
         if (cpu->isHalted) return;
 
-        //if (cpu->r[CPUReg::PC] == 0x18) doDisasm = true;
+        //if (cpu->r[CPUReg::PC] == 0x020C42BC) doDisasm = true;
 
         (cpu->cpsr.t) ? decodeTHUMB(cpu) : decodeARM(cpu);
 

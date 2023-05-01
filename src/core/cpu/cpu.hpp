@@ -146,4 +146,7 @@ private:
     PSR spsrFIQ, spsrSVC, spsrABT, spsrIRQ, spsrUND;
 };
 
+void setDTCM(u32 size);
+void setITCM(u32 size);
+
 }

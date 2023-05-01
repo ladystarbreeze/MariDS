@@ -12,6 +12,86 @@
 
 namespace nds::cpu {
 
+// A little hacky but eh
+u8 itcm[0x8000];
+u8 dtcm[0x4000];
+
+u32 itcmBase , dtcmBase;
+u32 itcmLimit, dtcmLimit;
+
+/* Returns true if address is in range [base;limit] */
+bool inRange(u64 addr, u64 base, u64 limit) {
+    return (addr >= base) && (addr < (base + limit));
+}
+
+u8 read8ARM9(u32 addr) {
+    if (inRange(addr, itcmBase, itcmLimit)) {
+        return itcm[addr & 0x7FFF];
+    } else if (inRange(addr, dtcmBase, dtcmLimit)) {
+        return dtcm[addr & 0x3FFF];
+    } else {
+        return bus::read8ARM9(addr);
+    }
+}
+
+u16 read16ARM9(u32 addr) {
+    u16 data;
+
+    if (inRange(addr, itcmBase, itcmLimit)) {
+        std::memcpy(&data, &itcm[addr & 0x7FFF], sizeof(u16));
+    } else if (inRange(addr, dtcmBase, dtcmLimit)) {
+        std::memcpy(&data, &dtcm[addr & 0x3FFF], sizeof(u16));
+    } else {
+        return bus::read16ARM9(addr);
+    }
+
+    return data;
+}
+
+u32 read32ARM9(u32 addr) {
+    u32 data;
+
+    if (inRange(addr, itcmBase, itcmLimit)) {
+        std::memcpy(&data, &itcm[addr & 0x7FFF], sizeof(u32));
+    } else if (inRange(addr, dtcmBase, dtcmLimit)) {
+        std::memcpy(&data, &dtcm[addr & 0x3FFF], sizeof(u32));
+    } else {
+        return bus::read32ARM9(addr);
+    }
+
+    return data;
+}
+
+void write8ARM9(u32 addr, u8 data) {
+    if (inRange(addr, itcmBase, itcmLimit)) {
+        itcm[addr & 0x7FFF] = data;
+    } else if (inRange(addr, dtcmBase, dtcmLimit)) {
+        dtcm[addr & 0x3FFF] = data;
+    } else {
+        return bus::write8ARM9(addr, data);
+    }
+}
+
+void write16ARM9(u32 addr, u16 data) {
+    if (inRange(addr, itcmBase, itcmLimit)) {
+        std::memcpy(&itcm[addr & 0x7FFF], &data, sizeof(u16));
+    } else if (inRange(addr, dtcmBase, dtcmLimit)) {
+        std::memcpy(&dtcm[addr & 0x3FFF], &data, sizeof(u16));
+    } else {
+        return bus::write16ARM9(addr, data);
+    }
+}
+
+void write32ARM9(u32 addr, u32 data) {
+    if (inRange(addr, itcmBase, itcmLimit)) {
+        std::memcpy(&itcm[addr & 0x7FFF], &data, sizeof(u32));
+    } else if (inRange(addr, dtcmBase, dtcmLimit)) {
+        std::memcpy(&dtcm[addr & 0x3FFF], &data, sizeof(u32));
+    } else {
+        return bus::write32ARM9(addr, data);
+    }
+}
+
 /* Exception vector base addresses */
 enum class VectorBase : u32 {
     ARM7 = 0,
@@ -40,13 +120,13 @@ CPU::CPU(int cpuID, CP15 *cp15) {
     } else {
         r[CPUReg::PC] = static_cast<u32>(VectorBase::ARM9);
 
-        read8  = &bus::read8ARM9;
-        read16 = &bus::read16ARM9;
-        read32 = &bus::read32ARM9;
+        read8  = &read8ARM9;
+        read16 = &read16ARM9;
+        read32 = &read32ARM9;
 
-        write8  = &bus::write8ARM9;
-        write16 = &bus::write16ARM9;
-        write32 = &bus::write32ARM9;
+        write8  = &write8ARM9;
+        write16 = &write16ARM9;
+        write32 = &write32ARM9;
     }
 
     // Set initial CPSR
@@ -236,6 +316,16 @@ void CPU::setIRQPending(bool irq) {
 
 void CPU::checkInterrupt() {
     if (irqPending && !cpsr.i) raiseIRQException();
+}
+
+void setDTCM(u32 size) {
+    dtcmBase  = size & ~0xFFF;
+    dtcmLimit = 512 << ((size >> 1) & 0x1F);
+}
+
+void setITCM(u32 size) {
+    itcmBase  = size & ~0xFFF;
+    itcmLimit = 512 << ((size >> 1) & 0x1F);
 }
 
 }

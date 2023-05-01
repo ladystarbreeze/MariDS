@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdio>
 
+#include "cpu.hpp"
 #include "../MariDS.hpp"
 
 namespace nds::cpu::cp15 {
@@ -135,6 +136,7 @@ void CP15::set(u32 idx, u32 data) {
             //std::printf("[ARM9:CP15 ] Invalidate data cache line 0x%08X\n", data);
             break;
         case CP15Reg::CDCL:
+        case CP15Reg::CDCL + 1:
             //std::printf("[ARM9:CP15 ] Clean data cache line 0x%08X\n", data);
             break;
         case CP15Reg::DWB:
@@ -148,11 +150,15 @@ void CP15::set(u32 idx, u32 data) {
             //std::printf("[ARM9:CP15 ] Write @ DTCM size = 0x%08X\n", data);
 
             dtcmSize = data & 0xFFFF003E;
+
+            setDTCM(dtcmSize);
             break;
         case CP15Reg::ITCMSize:
             //std::printf("[ARM9:CP15 ] Write @ ITCM size = 0x%08X\n", data);
 
             itcmSize = data & 0xFFFF003E;
+
+            setITCM(itcmSize);
             break;
         default:
             std::printf("[ARM9:CP15 ] Unhandled write @ 0x%04X = 0x%08X\n", idx, data);
